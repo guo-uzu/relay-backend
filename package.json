@@ -21,6 +21,7 @@
   "dependencies": {
     "better-auth": "^1.7.5",
     "express": "^5.2.1",
+    "googleapis": "^181.0.0",
     "pg": "^8.23.0"
   },
   "devDependencies": {

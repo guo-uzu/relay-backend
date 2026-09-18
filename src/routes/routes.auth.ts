@@ -1,7 +1,7 @@
 import express, { type Router, type Request, type Response } from "express";
 import { auth } from "../lib/auth.ts";
 
-const routerAuth = express.Router();
+const routerAuth: Router = express.Router();
 
 type BodyEmailPassword = {
   name?: string;
@@ -47,6 +47,11 @@ routerAuth.post("/sign-up/email", async (req: Request, res: Response) => {
   return res.status(200).json({ message: "added" });
 });
 
-routerAuth.get("/sign-out/email", async (req: Request, res: Response) => {});
+routerAuth.post("/sign-out/email", async (req: Request, res: Response) => {
+  await auth.api.signOut({
+    headers: req.cookies
+  })
+  return res.status(200).json({ message: "hit" })
+});
 
 export { routerAuth };
