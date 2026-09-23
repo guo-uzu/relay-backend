@@ -1,15 +1,30 @@
 import express, { type Router, type Request, type Response } from "express";
-import { sheets } from "../lib/sheets.ts";
+import { sheets, drive } from "../lib/sheets.ts";
+import { clientRedis } from "../lib/redis.ts";
 
 const routerSheets: Router = express.Router();
 
 routerSheets.get("/get-titles", async (req: Request, res: Response) => {
   try {
+    const meta = await drive.files.get({ fileId: process.env.GOOGLE_SPREADSHEET_ID, fields: "modifiedTime" })
+    const cached = JSON.parse(await clientRedis.get(`sheet:${process.env.GOOGLE_SPREADSHEET_ID}:headers`) || "null")
+    console.log("modified data", meta.data.modifiedTime)
+    console.log("modified cached", cached.modifiedTime)
+    if (cached && cached.modifiedTime === meta.data.modifiedTime) {
+      return res
+        .status(200)
+        .json({ message: "Fetched data", data: cached.headers, error: null });
+
+    }
+
     const { data } = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
       range: "Registro de Peticiones (Interno)!1:1",
     });
-    if (!data.values || data.values?.length <= 0) throw new Error("Error");
+
+    if (!data.values) throw new Error("Error");
+    const headers = data.values?.[0] || [];
+    await clientRedis.set(`sheet:${process.env.GOOGLE_SPREADSHEET_ID}:headers`, JSON.stringify({ headers, modifiedTime: meta.data.modifiedTime }), { EX: 3600 })
     return res
       .status(200)
       .json({ message: "Fetched data", data: data.values[0], error: null });

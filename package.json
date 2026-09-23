@@ -20,9 +20,12 @@
   "type": "module",
   "dependencies": {
     "better-auth": "^1.7.5",
+    "bullmq": "^6.3.8",
     "express": "^5.2.1",
     "googleapis": "^181.0.0",
-    "pg": "^8.23.0"
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.0",
+    "redis": "^6.2.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
