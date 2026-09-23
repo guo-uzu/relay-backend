@@ -1,12 +1,13 @@
 import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins";
 import { Pool } from "pg";
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
   database: new Pool({
-    database: "postgres",
-    user: "postgres_user",
-    password: "pass123",
+    database: process.env.POSTGRES_DB,
+    user: process.env.POSTGRES_USER,
+    password: process.env.POSTGRES_PASS,
     port: 5432,
     ssl: false,
     max: 20,
@@ -17,4 +18,15 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  user: {
+    additionalFields: {
+      plan: {type: "string", defaultValue: "free", input: false}
+    }
+  },
+  plugins: [
+    organization({
+      organizationLimit: 1,
+      membershipLimit: (user, org) => user.plan === "pro" ? 50 : 5,
+    })
+  ]
 });

@@ -4,17 +4,14 @@ import { clientRedis } from "../lib/redis.ts";
 
 const routerSheets: Router = express.Router();
 
-routerSheets.get("/get-titles", async (req: Request, res: Response) => {
+routerSheets.get("/:id/get-titles", async (req: Request, res: Response) => {
   try {
     const meta = await drive.files.get({ fileId: process.env.GOOGLE_SPREADSHEET_ID, fields: "modifiedTime" })
     const cached = JSON.parse(await clientRedis.get(`sheet:${process.env.GOOGLE_SPREADSHEET_ID}:headers`) || "null")
-    console.log("modified data", meta.data.modifiedTime)
-    console.log("modified cached", cached.modifiedTime)
     if (cached && cached.modifiedTime === meta.data.modifiedTime) {
       return res
         .status(200)
         .json({ message: "Fetched data", data: cached.headers, error: null });
-
     }
 
     const { data } = await sheets.spreadsheets.values.get({
@@ -29,9 +26,16 @@ routerSheets.get("/get-titles", async (req: Request, res: Response) => {
       .status(200)
       .json({ message: "Fetched data", data: data.values[0], error: null });
   } catch (error) {
-    return res.status(500).json({ message: error });
+    return res.status(500).json({ message: "Error caching titles" });
   }
 });
+
+routerSheets.put("/:id/polling", async (req: Request, res: Response) => {
+  return res.status(200).json({
+    message: "Polling activated"
+  })
+})
+
 
 routerSheets.get("/get-data", async (req: Request, res: Response) => {
   try {
