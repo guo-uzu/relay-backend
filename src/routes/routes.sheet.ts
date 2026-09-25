@@ -1,8 +1,23 @@
 import express, { type Router, type Request, type Response } from "express";
 import { sheets, drive } from "../lib/sheets.ts";
 import { clientRedis } from "../lib/redis.ts";
+import { LinkGoogleSheets } from "../lib/validations.ts";
+import z from "zod";
 
 const routerSheets: Router = express.Router();
+
+routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
+  const result = LinkGoogleSheets.safeParse(req.body)
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Invalid link",
+      error: z.flattenError(result.error).fieldErrors
+    })
+  }
+  const spreadsheetId = result.data.link
+
+  return res.status(200).json({ message: "id added", data: { spreadsheetId } })
+})
 
 routerSheets.get("/:id/get-titles", async (req: Request, res: Response) => {
   try {

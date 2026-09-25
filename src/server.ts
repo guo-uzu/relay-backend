@@ -11,9 +11,10 @@ if (process.env.RUN_WORKER === "true") {
 }
 
 const app: Express = express();
+
 app.use(pinoHttp({ logger }));
 // auth
-app.all("/api/v1/better-auth/auth/{*any}", toNodeHandler(auth));
+app.all("/api/v1/auth/{*any}", toNodeHandler(auth));
 app.use(express.json());
 
 app.use("/api/v1/google-sheets", requireAuth, routerSheets)
