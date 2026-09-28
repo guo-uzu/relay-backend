@@ -16,6 +16,7 @@ const app: Express = express();
 app.use(pinoHttp({ logger }));
 // auth
 app.all("/api/v1/auth/{*any}", toNodeHandler(auth));
+
 app.use(express.json());
 app.use(cookieParser())
 
