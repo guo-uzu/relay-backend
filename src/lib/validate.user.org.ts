@@ -13,3 +13,17 @@ export const validateUserOrg = async (org: string, userId: string) => {
   }
   return true;
 };
+
+export const validateUserOrgRole = async (
+  org: string,
+  userId: string,
+  roles: string[],
+) => {
+  const [memberData] = await db
+    .select({ role: member.role })
+    .from(member)
+    .where(and(eq(member.organizationId, org), eq(member.userId, userId)))
+    .limit(1);
+
+  return memberData && roles.includes(memberData.role);
+};

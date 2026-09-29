@@ -13,6 +13,7 @@ export const sheet = pgTable("sheet", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id),
+  name: text().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()

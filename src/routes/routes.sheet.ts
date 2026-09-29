@@ -1,28 +1,32 @@
 import express, { type Router, type Request, type Response } from "express";
-import { sheets, drive } from "../lib/sheets.ts";
-import { clientRedis } from "../lib/redis.ts";
-import { LinkGoogleSheets } from "../lib/validations.ts";
+import { sheets } from "../lib/sheets.ts";
+import { SetSheetId, SheetIdBody } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
-import { sheet } from "../db/app.schema.ts";
-import { validateUserOrg } from "../lib/validate.user.org.ts";
+import { pollingSheet, sheet } from "../db/app.schema.ts";
+import {
+  validateUserOrg,
+  validateUserOrgRole,
+} from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { SheetQueue } from "../jobs/sheetQueue.ts";
-import { organization } from "../db/schema.ts";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
+import { getSheetTitles } from "../services/googleSheets.service.ts";
 
 const routerSheets: Router = express.Router();
+const SHEET_POLL_INTERVAL_MS = 60_000;
+const ORGANIZATION_ROLES = ["admin", "owner"];
 /*
   @param :id is the id of the organization
 */
 
 routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
-  const result = LinkGoogleSheets.safeParse(req.body);
+  const result = SetSheetId.safeParse(req.body);
   const organizationId = req.params.id as string;
 
   if (!result.success) {
     return res.status(400).json({
-      message: "Invalid ID organization",
+      message: "Incomplete data sended",
       error: z.flattenError(result.error).fieldErrors,
     });
   }
@@ -31,11 +35,12 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
 
   if (!(await validateUserOrg(organizationId, user.id)))
     return res.status(401).json({ message: "Unauthorized" });
-  const spreadsheetId = result.data.link;
-
+  const spreadsheetId = result.data.sheetId;
+  const spreadsheetName = result.data.nameSheet;
   try {
     await db.insert(sheet).values({
       sheetId: spreadsheetId,
+      name: spreadsheetName,
       organizationId: organizationId,
       userId: user.id,
     });
@@ -50,85 +55,189 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
 
 routerSheets.get("/:id/get-titles", async (req: Request, res: Response) => {
   try {
-    const meta = await drive.files.get({
-      fileId: process.env.GOOGLE_SPREADSHEET_ID,
-      fields: "modifiedTime",
-    });
-    const cached = JSON.parse(
-      (await clientRedis.get(
-        `sheet:${process.env.GOOGLE_SPREADSHEET_ID}:headers`,
-      )) || "null",
-    );
-    if (cached && cached.modifiedTime === meta.data.modifiedTime) {
-      return res
-        .status(200)
-        .json({ message: "Fetched data", data: cached.headers, error: null });
+    const organizationId = req.params.id as string;
+    const user = res.locals.user as User;
+
+    if (
+      !(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))
+    ) {
+      return res.status(403).json({
+        message: "Forbidden",
+      });
     }
 
-    const { data } = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: "Registro de Peticiones (Interno)!1:1",
+    const result = SheetIdBody.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Invalid sheet id",
+        error: z.flattenError(result.error).fieldErrors,
+      });
+    }
+
+    const { sheetId } = result.data;
+
+    const [sheetData] = await db
+      .select({
+        name: sheet.name,
+      })
+      .from(sheet)
+      .where(
+        and(
+          eq(sheet.organizationId, organizationId),
+          eq(sheet.sheetId, sheetId),
+        ),
+      )
+      .limit(1);
+
+    if (!sheetData) {
+      return res.status(404).json({
+        message: "Sheet not found",
+      });
+    }
+
+    const headers = await getSheetTitles({
+      spreadsheetId: sheetId,
+      sheetName: sheetData.name,
     });
 
-    if (!data.values) throw new Error("Error");
-    const headers = data.values?.[0] || [];
-    await clientRedis.set(
-      `sheet:${process.env.GOOGLE_SPREADSHEET_ID}:headers`,
-      JSON.stringify({ headers, modifiedTime: meta.data.modifiedTime }),
-      { EX: 3600 },
-    );
     return res
       .status(200)
-      .json({ message: "Fetched data", data: data.values[0], error: null });
+      .json({ message: "Fetched data", data: headers, error: null });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({ message: "Error caching titles" });
   }
 });
 
 routerSheets.put("/:id/polling-titles", async (req: Request, res: Response) => {
-  const organizationId = req.params.id as string;
-  const user = res.locals.user as User;
+  try {
+    const organizationId = req.params.id as string;
+    const user = res.locals.user as User;
 
-  const data = db
-    .select({ id: organization.id })
-    .from(organization)
-    .where(eq(organization.id, organizationId))
+    if (
+      !(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
 
-  if (!data) {
-    return res.status(404).json({
-      message: "Organization not found",
+    const result = SheetIdBody.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Invalid sheet id",
+        error: z.flattenError(result.error).fieldErrors,
+      });
+    }
+
+    const [sheetData] = await db
+      .select({ id: sheet.id })
+      .from(sheet)
+      .where(
+        and(
+          eq(sheet.organizationId, organizationId),
+          eq(sheet.sheetId, result.data.sheetId),
+        ),
+      )
+      .limit(1);
+
+    if (!sheetData) {
+      return res.status(404).json({ message: "Sheet not found" });
+    }
+
+    await SheetQueue.upsertJobScheduler(
+      `sheet-poll:${organizationId}:${sheetData.id}`,
+      { every: SHEET_POLL_INTERVAL_MS },
+      {
+        name: "poll-sheet-titles",
+        data: { organizationId, sheetDbId: sheetData.id },
+        opts: {
+          attempts: 3,
+          backoff: {
+            type: "exponential",
+            delay: 5000,
+          },
+          removeOnComplete: 100,
+          removeOnFail: 1000,
+        },
+      },
+    );
+
+    await db
+      .insert(pollingSheet)
+      .values({sheetId: sheetData.id, organizationId: organizationId, turnOn: true})
+
+    return res.status(200).json({
+      message: "Polling activated",
     });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Error activating polling" });
   }
-/*
-    await SheetQueue.upsertJobScheduler(`org-${organizationId}:id-${selectedSheet}`, {
-    every: 10000
-  },
-    {
-      name: `Polling`,
-      data: { url: `http://localhost:3000/api/v1/google-sheets/${organizationId}/get-titles`, idGoogleSheets: selectedSheet, organizationId: organizationId },
-      opts: {
-        attempts: 3,
-        backoff: {
-          type: "exponential",
-          delay: 5000
-        }
-      }
-  })
-  */
-  return res.status(200).json({
-    message: "Polling activated",
-  });
 });
 
-routerSheets.delete("/:id/stop-polling", async (req: Request, res: Response) => {
-  const selectedSheet = req.body.polling
+routerSheets.delete(
+  "/:id/stop-polling",
+  async (req: Request, res: Response) => {
+    try {
+      const organizationId = req.params.id as string;
+      const user = res.locals.user as User;
 
-  await SheetQueue.removeJobScheduler(selectedSheet)
-  return res.status(200).json({
-    message: "Polling deactivated"
-  })
-})
+      if (
+        !(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))
+      ) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
 
+      const result = SheetIdBody.safeParse(req.body);
+
+      if (!result.success) {
+        return res.status(400).json({
+          message: "Invalid sheet id",
+          error: z.flattenError(result.error).fieldErrors,
+        });
+      }
+
+      const [sheetData] = await db
+        .select({ id: sheet.id })
+        .from(sheet)
+        .where(
+          and(
+            eq(sheet.organizationId, organizationId),
+            eq(sheet.sheetId, result.data.sheetId),
+          ),
+        )
+        .limit(1);
+
+      if (!sheetData) {
+        return res.status(404).json({ message: "Sheet not found" });
+      }
+
+      await SheetQueue.removeJobScheduler(
+        `sheet-poll:${organizationId}:${sheetData.id}`,
+      );
+
+      await db
+        .update(pollingSheet)
+        .set({ turnOn: false })
+        .where(
+          and(
+            eq(pollingSheet.organizationId, organizationId),
+            eq(pollingSheet.sheetId, sheetData.id),
+          ),
+        );
+
+      return res.status(200).json({
+        message: "Polling deactivated",
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({ message: "Error deactivating polling" });
+    }
+  },
+);
 
 routerSheets.get("/:id/get-data", async (req: Request, res: Response) => {
   try {

@@ -2,10 +2,13 @@ import z from "zod"
 
 const REGEX_SHEETS_URL = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]{40,50})(?:\/|$)/
 
-const LinkGoogleSheets = z.object({
-  link: z.string()
-    .regex(REGEX_SHEETS_URL, "Must be a Google Sheets Link")
-    .transform((link) => REGEX_SHEETS_URL.exec(link)![1]),
+const SetSheetId = z.object({
+  sheetId: z.string().min(1, "Sheet id is required"),
+  nameSheet: z.string().min(1, "Sheet name is required")
 })
 
-export { LinkGoogleSheets }
+const SheetIdBody = z.object({
+  sheetId: z.string().min(1, "Sheet id is required"),
+})
+
+export { SetSheetId, SheetIdBody }
