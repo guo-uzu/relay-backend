@@ -146,6 +146,14 @@ routerSheets.put("/:id/polling-titles", async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Sheet not found" });
     }
 
+    const existingScheduler = await SheetQueue.getJobScheduler(
+      `sheet-poll:${organizationId}:${sheetData.id}`,
+    );
+
+    if (existingScheduler) {
+      return res.status(409).json({ message: "Polling already exists" });
+    }
+
     await SheetQueue.upsertJobScheduler(
       `sheet-poll:${organizationId}:${sheetData.id}`,
       { every: SHEET_POLL_INTERVAL_MS },
@@ -164,9 +172,11 @@ routerSheets.put("/:id/polling-titles", async (req: Request, res: Response) => {
       },
     );
 
-    await db
-      .insert(pollingSheet)
-      .values({sheetId: sheetData.id, organizationId: organizationId, turnOn: true})
+    await db.insert(pollingSheet).values({
+      sheetId: sheetData.id,
+      organizationId: organizationId,
+      turnOn: true,
+    });
 
     return res.status(200).json({
       message: "Polling activated",
@@ -185,7 +195,11 @@ routerSheets.delete(
       const user = res.locals.user as User;
 
       if (
-        !(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))
+        !(await validateUserOrgRole(
+          organizationId,
+          user.id,
+          ORGANIZATION_ROLES,
+        ))
       ) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -212,6 +226,14 @@ routerSheets.delete(
 
       if (!sheetData) {
         return res.status(404).json({ message: "Sheet not found" });
+      }
+
+      const existingScheduler = await SheetQueue.getJobScheduler(
+        `sheet-poll:${organizationId}:${sheetData.id}`,
+      );
+
+      if (!existingScheduler) {
+        return res.status(409).json({ message: "Polling is not activated" });
       }
 
       await SheetQueue.removeJobScheduler(
