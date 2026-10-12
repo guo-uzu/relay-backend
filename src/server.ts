@@ -17,9 +17,11 @@ app.use(pinoHttp({ logger }));
 // auth
 app.all("/api/v1/auth/{*any}", toNodeHandler(auth));
 
+// parsers
 app.use(express.json());
-app.use(cookieParser())
+app.use(cookieParser());
 
-app.use("/api/v1/google-sheets", requireAuth, routerSheets)
+// functionalities
+app.use("/api/v1/google-sheets", requireAuth, routerSheets);
 
 app.listen(3000);

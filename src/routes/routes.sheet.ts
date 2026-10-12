@@ -188,7 +188,7 @@ routerSheets.put("/:id/polling-titles", async (req: Request, res: Response) => {
 });
 
 routerSheets.delete(
-  "/:id/stop-polling",
+  "/:id/stop-polling-titles",
   async (req: Request, res: Response) => {
     try {
       const organizationId = req.params.id as string;
