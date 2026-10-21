@@ -10,7 +10,7 @@ import {
 } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { SheetQueue } from "../jobs/sheetQueue.ts";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { getSheetTitles } from "../services/googleSheets.service.ts";
 
 const routerSheets: Router = express.Router();
@@ -262,12 +262,19 @@ routerSheets.delete(
 );
 
 routerSheets.get("/:id/get-data", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const user = res.locals.user as User;
+  if (!(await validateUserOrg(organizationId, user.id)))
+    return res.status(401).json({ message: "Unauthorized" });
+
   try {
     const { data } = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: "Registro de Peticiones (Interno)!B1:Z",
+      range: "Registro de Peticiones (Interno)!A1:Z",
     });
     if (!data.values || data.values?.length <= 0) throw new Error("Error");
+    const titles = data.values[0]
+    console.log(titles)
     return res
       .status(200)
       .json({ message: "Fetched data", data: data.values, error: null });
