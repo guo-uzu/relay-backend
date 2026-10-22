@@ -12,6 +12,7 @@ import type { User } from "better-auth";
 import { SheetQueue } from "../jobs/sheetQueue.ts";
 import { eq, and, sql } from "drizzle-orm";
 import { getSheetTitles } from "../services/googleSheets.service.ts";
+import { title } from "process";
 
 const routerSheets: Router = express.Router();
 const SHEET_POLL_INTERVAL_MS = 60_000;
@@ -261,23 +262,39 @@ routerSheets.delete(
   },
 );
 
-routerSheets.get("/:id/get-data", async (req: Request, res: Response) => {
+routerSheets.post("/:id/get-data", async (req: Request, res: Response) => {
+  const result = SheetIdBody.safeParse(req.body);
   const organizationId = req.params.id as string;
   const user = res.locals.user as User;
-  if (!(await validateUserOrg(organizationId, user.id)))
-    return res.status(401).json({ message: "Unauthorized" });
+
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Incomplete data sended",
+      error: z.flattenError(result.error).fieldErrors,
+    });
+  }
+
+  if (
+    !(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))
+  ) {
+    return res.status(403).json({
+      message: "Forbidden",
+    });
+  }
 
   try {
-    const { data } = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: "Registro de Peticiones (Interno)!A1:Z",
+
+    const { data: dataRows } = await sheets.spreadsheets.values.get({
+      spreadsheetId: req.body.sheetId,
+      range: "Registro de Peticiones (Interno)",
     });
-    if (!data.values || data.values?.length <= 0) throw new Error("Error");
-    const titles = data.values[0]
-    console.log(titles)
+    if (!dataRows.values) throw new Error("Error")
+    const titles = dataRows.values.splice(0, 1)[0];
+    // console.log("titles", titles)
+    // console.log("data", dataRows.values[0], dataRows.values[dataRows.values.length-1])
     return res
       .status(200)
-      .json({ message: "Fetched data", data: data.values, error: null });
+      .json({ message: "Fetched data", error: null });
   } catch (error) {
     return res.status(500).json({ message: "Error" });
   }

@@ -7,10 +7,10 @@ import type TestAgent from "supertest/lib/agent.js";
 
 const API = "http://localhost:3000";
 const AUTH = "/api/v1/auth";
+const SHEETS = "/api/v1/google-sheets";
 
+let client: TestAgent, response: Response, org: Response;
 describe("Better Auth", () => {
-  let client: TestAgent;
-  let response: Response
   it("Should Register, sign in and get session", async () => {
     const email = `test-${randomUUID()}@example.com`;
     const password = "test1234";
@@ -31,14 +31,30 @@ describe("Better Auth", () => {
     expect(response.body.user.email).toBe(email);
   });
 
-  it("Should generate an org and put an id", async () => {
+  it("Should generate an org", async () => {
     const organization = "My Org";
-    const slug = `my-org-${randomUUID()}`;  
-    const org = await client
+    const slug = `my-org-${randomUUID()}`;
+    org = await client
       .post(`${AUTH}/organization/create`)
-      .set({ "Origin":"http://localhost:3000"})
+      .set({ Origin: "http://localhost:3000" })
       .send({ name: organization, slug, userId: response.body.user.id })
-      .expect(200)
-    console.log(org)
+      .expect(200);
+  });
+});
+
+describe("Sheet operations", { timeout: 15_000 }, () => {
+  const id = "1OoY4QG2mes59WaXaoOJqFgE67DS2ZFBV2PTRuICFx5w";
+  it("Should put an id", async () => {
+    const name = "Registro de Peticiones (Interno)";
+    await client
+      .post(`${SHEETS}/${org.body.id}/set-sheet-id`)
+      .send({ sheetId: id, nameSheet: name })
+      .expect(201);
+  });
+
+  it("Should fetch data and create the table", async () => {
+    await client.post(`${SHEETS}/${org.body.id}/get-data`)
+      .send({ sheetId: id })
+      .expect(200);
   });
 });
