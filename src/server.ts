@@ -7,10 +7,6 @@ import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger.ts";
 import cookieParser from "cookie-parser";
 
-if (process.env.RUN_WORKER === "true") {
-  await import("./jobs/workerQueue.ts");
-}
-
 const app: Express = express();
 
 app.use(pinoHttp({ logger }));

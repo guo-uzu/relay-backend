@@ -1,6 +1,6 @@
 # Relay backend
 
-Relay's API provides Better Auth authentication and organization-scoped Google Sheets endpoints. It uses PostgreSQL for application data and Redis for cached sheet headers and BullMQ jobs.
+Relay's API provides Better Auth authentication and organization-scoped Google Sheets endpoints. It uses PostgreSQL for application data.
 
 ## Requirements
 
@@ -13,8 +13,7 @@ Relay's API provides Better Auth authentication and organization-scoped Google S
   ```
 
 - PostgreSQL 18 (or a compatible PostgreSQL server)
-- Redis 6 or later
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) with Compose is optional, but is the simplest way to run PostgreSQL and Redis locally.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) with Compose is optional, but is the simplest way to run PostgreSQL locally.
 - A Google Cloud service account is required only for the Google Sheets endpoints.
 
 ## Install
@@ -42,15 +41,7 @@ POSTGRES_USER=relay
 POSTGRES_PASS=change-this-local-password
 DATABASE_URL=postgresql://relay:change-this-local-password@localhost:5432/relay
 
-# Redis: used by BullMQ
-REDIS_PASS=change-this-local-redis-password
-REDIS_URL=redis://:change-this-local-redis-password@localhost:6379
-
-# Optional: only used by GET /api/v1/google-sheets/:id/get-data
-GOOGLE_SPREADSHEET_ID=your-google-spreadsheet-id
-
 # Optional
-RUN_WORKER=false
 LOG_LEVEL=info
 ```
 
@@ -64,24 +55,21 @@ Do not leave the sample passwords in any shared or deployed environment. If a Po
 | `BETTER_AUTH_URL` | Yes | The public URL of this API. Use `http://localhost:3000` locally; use the deployed API URL in production. |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASS` | When using `docker-compose.yml` | Choose local database name, user, and password. Docker Compose uses these to create PostgreSQL on first start. A hosted provider instead gives you its connection details. |
 | `DATABASE_URL` | Yes | PostgreSQL connection URL constructed from the values above, or copied from your managed PostgreSQL provider. It is used by the API and Drizzle. |
-| `REDIS_PASS` | When using `docker-compose.yml` | Choose a local Redis password. The Compose service enables Redis authentication with it. A hosted Redis provider supplies this as part of its connection URL. |
-| `REDIS_URL` | Yes for BullMQ | Redis connection URL. With the local Compose service, it is `redis://:<REDIS_PASS>@localhost:6379`. |
-| `GOOGLE_SPREADSHEET_ID` | Only for the legacy `get-data` endpoint | Copy the ID between `/d/` and `/edit` in the Google Sheets URL. Other sheet endpoints receive the ID in the request body. |
 | `RUN_WORKER` | No | Set to `true` to run the BullMQ worker in the API process; leave `false` when only testing the HTTP API. |
 | `LOG_LEVEL` | No | A [Pino log level](https://getpino.io/#/docs/api?id=logger-level), such as `debug`, `info`, `warn`, or `error`. Defaults to `info`. |
 
 ## Start local services
 
-With the `.env` file in place, start PostgreSQL and Redis:
+With the `.env` file in place, start PostgreSQL:
 
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
-The services are exposed on `localhost:5432` and `localhost:6379`. To see service logs, run `docker compose logs -f postgres redis`. Use `docker compose down` to stop them; it preserves the named Redis volume. The PostgreSQL data path is configured in `docker-compose.yml`, so do not delete its data volume or directory unless you intend to discard local database data.
+PostgreSQL is exposed on `localhost:5432`. To see its logs, run `docker compose logs -f postgres`. Use `docker compose down` to stop it. The PostgreSQL data path is configured in `docker-compose.yml`, so do not delete its data volume or directory unless you intend to discard local database data.
 
-You may use external PostgreSQL and Redis services instead. Set `DATABASE_URL` and `REDIS_URL` to their provider-issued URLs and do not start the Compose services.
+You may use an external PostgreSQL service instead. Set `DATABASE_URL` to its provider-issued URL and do not start the Compose services.
 
 ## Create the database schema
 
@@ -111,12 +99,12 @@ Those legacy files do not create the application-specific sheet tables. Generate
 Skip this section if you only need authentication or organization endpoints.
 
 1. In the [Google Cloud Console](https://console.cloud.google.com/), create or select a project.
-2. Enable the Google Sheets API and Google Drive API for that project.
+2. Enable the Google Sheets API for that project.
 3. Create a service account and create a JSON key from **IAM & Admin → Service Accounts**.
 4. Save the downloaded key as `relay-test-credentials.json` in the project root. This exact filename is currently required by `src/lib/sheets.ts` and is ignored by Git.
 5. Open the JSON file, copy its `client_email`, and share every target spreadsheet with that email. Give it at least Viewer access; use Editor only if future write operations require it.
 
-The server requests the `spreadsheets` and read-only Drive scopes. Drive access is used to check a spreadsheet's modification time for the Redis cache.
+The server requests the `spreadsheets` scope.
 
 ## Run the API
 
@@ -124,7 +112,7 @@ The server requests the `spreadsheets` and read-only Drive scopes. Drive access 
 pnpm dev
 ```
 
-This starts `node --env-file=.env --watch src/server.ts` on <http://localhost:3000> and reloads when source files change. Set `RUN_WORKER=true` before starting it if this local process should also consume scheduled sheet-polling jobs.
+This starts `node --env-file=.env --watch src/server.ts` on <http://localhost:3000> and reloads when source files change.
 
 To type-check without generating JavaScript:
 
@@ -152,7 +140,3 @@ Refer to the [Better Auth documentation](https://www.better-auth.com/docs) for i
 | `pnpm db:generate` | Generate Drizzle migration files from the current schema. |
 | `pnpm db:migrate` | Apply generated Drizzle migrations using `DATABASE_URL`. |
 | `pnpm exec tsc` | Type-check the project without emitting files. |
-
-## Current Redis note
-
-`REDIS_URL` is correctly used by BullMQ. The Redis cache client in `src/lib/redis.ts`, however, currently calls `createClient()` without reading `REDIS_URL`. Because the included Compose configuration requires `REDIS_PASS`, Google Sheets cache operations will not authenticate to that Redis container until that client is configured with the same URL/password. Authentication routes can still be developed independently; this limitation affects the Google Sheets cache and related functionality.

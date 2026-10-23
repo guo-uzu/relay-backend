@@ -44,17 +44,29 @@ describe("Better Auth", () => {
 
 describe("Sheet operations", { timeout: 15_000 }, () => {
   const id = "1OoY4QG2mes59WaXaoOJqFgE67DS2ZFBV2PTRuICFx5w";
+  let connectionId: string;
+
   it("Should put an id", async () => {
     const name = "Registro de Peticiones (Interno)";
-    await client
+    const res = await client
       .post(`${SHEETS}/${org.body.id}/set-sheet-id`)
       .send({ sheetId: id, nameSheet: name })
       .expect(201);
+    connectionId = res.body.data.connectionId;
   });
 
-  it("Should fetch data and create the table", async () => {
-    await client.post(`${SHEETS}/${org.body.id}/get-data`)
-      .send({ sheetId: id })
+  it("Should return the same connection when registered twice", async () => {
+    const res = await client
+      .post(`${SHEETS}/${org.body.id}/set-sheet-id`)
+      .send({ sheetId: id, nameSheet: "Registro de Peticiones (Interno)" })
+      .expect(200);
+    expect(res.body.data.connectionId).toBe(connectionId);
+  });
+
+  it("Should import the sheet into the database", async () => {
+    await client
+      .post(`${SHEETS}/${org.body.id}/import-sheet`)
+      .send({ connectionId })
       .expect(200);
   });
 });

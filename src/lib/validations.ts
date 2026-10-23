@@ -7,8 +7,8 @@ const SetSheetId = z.object({
   nameSheet: z.string().min(1, "Sheet name is required")
 })
 
-const SheetIdBody = z.object({
-  sheetId: z.string().min(1, "Sheet id is required"),
+const ImportSheetBody = z.object({
+  connectionId: z.string().min(1, "Connection id is required"),
 })
 
-export { SetSheetId, SheetIdBody }
+export { SetSheetId, ImportSheetBody }
