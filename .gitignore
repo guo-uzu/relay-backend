@@ -142,4 +142,7 @@ dist
 .svelte-kit
 relay-test-credentials.json
 
+# test / vitest
+.vitest
+
 # End of https://www.toptal.com/developers/gitignore/api/node

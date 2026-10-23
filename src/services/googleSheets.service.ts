@@ -1,46 +1,23 @@
-import { drive, sheets } from "../lib/sheets.ts"
-import { clientRedis } from "../lib/redis.ts";
+import { sheets } from "../lib/sheets.ts";
 
-
-export async function getSheetTitles({
-  spreadsheetId,
-  sheetName,
-}: {
-  spreadsheetId: string;
-  sheetName?: string;
-}) {
-  const meta = await drive.files.get({
-    fileId: spreadsheetId,
-    fields: "modifiedTime",
+export async function getTabs(spreadsheetId: string) {
+  const { data } = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(sheetId,title)",
   });
 
-  const cacheKey = `sheet:${spreadsheetId}:headers`;
+  return (data.sheets ?? []).map((s) => ({
+    id: s.properties!.sheetId!,
+    title: s.properties!.title!,
+  }));
+}
 
-  const cached = JSON.parse((await clientRedis.get(cacheKey)) || "null");
-
-  if (cached?.modifiedTime === meta.data.modifiedTime) {
-    return cached.headers;
-  }
-
+// shortcut: one request for the whole tab, fine below ~10k rows; read in row ranges if Google's ~2MB response guidance is hit
+export async function getTabRows(spreadsheetId: string, tabTitle: string) {
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: sheetName ? `'${sheetName.replaceAll("'", "''")}'!1:1` : "1:1",
+    range: `'${tabTitle.replaceAll("'", "''")}'`,
   });
 
-  const headers = data.values?.[0];
-
-  if (!headers) {
-    throw new Error("Spreadsheet has no headers");
-  }
-
-  await clientRedis.set(
-    cacheKey,
-    JSON.stringify({
-      headers,
-      modifiedTime: meta.data.modifiedTime,
-    }),
-    { EX: 3600 },
-  );
-
-  return headers;
+  return (data.values ?? []) as string[][];
 }
