@@ -7,8 +7,12 @@ export const SetSheetId = z.object({
   nameSheet: z.string().min(1, "Sheet name is required")
 });
 
-const ImportSheetBody = z.object({
+export const ImportSheetBody = z.object({
   connectionId: z.string().min(1, "Connection id is required"),
 })
 
-export { SetSheetId, ImportSheetBody }
+export const SheetPayloadSchema = z.object({
+  sheetId: z.string(),
+  meta: z.any(),
+  changes: z.any()
+})

@@ -6,7 +6,9 @@ import {
   timestamp,
   integer,
   jsonb,
+  index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const sheet = pgTable("sheet", {
   id: text("id")
@@ -19,7 +21,7 @@ export const sheet = pgTable("sheet", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id),
-  name: text().notNull(),
+  nameSheet: text("name").notNull(),
   // nullable: rows registered before the import feature have no tab id
   googleTabId: integer("google_tab_id"),
   headers: text("headers").array(),
@@ -31,7 +33,11 @@ export const sheet = pgTable("sheet", {
     .defaultNow()
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
-});
+}, (table) => [
+  index("organization_sheet_name_idx")
+    .using("btree", table.organizationId, table.sheetId, sql`lower(${table.nameSheet})`),
+  index("values_idx").using("gin", table.values)
+]);
 
 export const history = pgTable("history", {
   id: text("id")

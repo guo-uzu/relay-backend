@@ -19,5 +19,6 @@ app.use(cookieParser());
 
 // functionalities
 app.use("/api/v1/google-sheets", requireAuth, routerSheets);
+app.use("/api/v1/webhook", routerSheets)
 
 app.listen(3000);

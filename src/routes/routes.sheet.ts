@@ -7,8 +7,8 @@ import { validateUserOrgRole } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { eq, and } from "drizzle-orm";
 import { getTabRows, getTabs } from "../services/googleSheets.service.ts";
-import { parseSheetRows, SheetImportError } from "../lib/sheetImport.ts";
-
+import { parseSheetRows, SheetImportError} from "../lib/sheetImport.ts";
+import { SheetPayloadSchema } from "../lib/validations.ts";
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
 
@@ -30,10 +30,8 @@ export interface LogEntry {
   @param :id is the id of the organization
 */
 
-// ==========================================
-// NUEVO WEBHOOK: Recibe los cambios desde Google Apps Script
-// ==========================================
-routerSheets.post("/webhook/log", async (req: Request, res: Response) => {
+routerSheets.post("/updates", async (req: Request, res: Response) => {
+  console.log(req.body)
   const result = SheetPayloadSchema.safeParse(req.body);
 
   if (!result.success) {
@@ -43,59 +41,12 @@ routerSheets.post("/webhook/log", async (req: Request, res: Response) => {
     });
   }
 
-  const { meta, changes } = result.data as SheetPayload;
-  const logs: LogEntry[] = [];
-
-  changes.forEach((change: SheetChangeItem) => {
-    if (change.changed && Object.keys(change.changed).length > 0) {
-      for (const [column, diff] of Object.entries(change.changed)) {
-        const isDiffObject =
-          typeof diff === 'object' && diff !== null && ('old' in diff || 'new' in diff);
-
-        logs.push({
-          id: change.id,
-          user: meta.user,
-          trigger: meta.trigger,
-          timestamp: meta.at,
-          row: change.row,
-          column,
-          modification: isDiffObject
-            ? {
-                old: (diff as { old?: unknown }).old ?? null,
-                new: (diff as { new?: unknown }).new ?? null
-              }
-            : diff
-        });
-      }
-    } else {
-      logs.push({
-        id: change.id,
-        user: meta.user,
-        trigger: meta.trigger,
-        timestamp: meta.at,
-        row: change.row,
-        column: 'N/A',
-        modification: change.data
-      });
-    }
-  });
-
-  // Log en consola para verificar qué está llegando
-  console.log(JSON.stringify(logs, null, 2));
-
-  // TODO: Si necesitas guardar los cambios en la base de datos, 
-  // aquí deberías hacer el db.insert().values() correspondiente a tu tabla de logs.
-
+  console.log(result.data)
   return res.status(200).json({
     message: "Webhook processed successfully",
-    total: logs.length,
-    data: logs
   });
 });
 
-// ==========================================
-// RUTAS EXISTENTES
-// ==========================================
 routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
   const result = SetSheetId.safeParse(req.body);
   const organizationId = req.params.id as string;
@@ -163,9 +114,6 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
   }
 });
 
-/*
-@deprecated
-*/
 routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
   const result = ImportSheetBody.safeParse(req.body);
   const organizationId = req.params.id as string;
