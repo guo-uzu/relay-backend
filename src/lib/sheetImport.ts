@@ -1,33 +1,32 @@
 export class SheetImportError extends Error {}
 
-const ID_HEADER = "_id";
-
 export function parseSheetRows(rows: string[][]) {
-  const headers = rows[0];
-  if (!headers?.length) throw new SheetImportError("Worksheet has no headers");
-
-  const idIndex = headers.indexOf(ID_HEADER);
-  if (idIndex === -1 || headers.indexOf(ID_HEADER, idIndex + 1) !== -1) {
-    throw new SheetImportError(`Headers must contain exactly one "${ID_HEADER}"`);
+  if (!rows || rows.length === 0) {
+    throw new SheetImportError("Worksheet is empty");
   }
 
-  const seen = new Set<string>();
+  // Encuentra la primera fila que contenga al menos una celda con texto
+  const headerRowIndex = rows.findIndex((row) =>
+    row.some((cell) => cell && cell.trim() !== "")
+  );
+
+  if (headerRowIndex === -1) {
+    throw new SheetImportError("Worksheet has no headers");
+  }
+
+  const rawHeaders = rows[headerRowIndex];
+  // Filtra y limpia los encabezados
+  const headers = rawHeaders.map((h, i) => (h && h.trim() !== "" ? h.trim() : `Columna ${i + 1}`));
+
   const values: (string | null)[][] = [];
 
-  rows.slice(1).forEach((row, i) => {
-    if (row.every((cell) => cell === "")) return;
+  rows.slice(headerRowIndex + 1).forEach((row) => {
+    // Omite filas totalmente en blanco
+    if (row.every((cell) => !cell || cell.trim() === "")) return;
 
-    const sheetRow = i + 2;
-    if (row.slice(headers.length).some((cell) => cell !== "")) {
-      throw new SheetImportError(`Row ${sheetRow} has data beyond the headers`);
-    }
-
-    const id = row[idIndex];
-    if (!id) throw new SheetImportError(`Row ${sheetRow} has an empty ${ID_HEADER}`);
-    if (seen.has(id)) throw new SheetImportError(`Row ${sheetRow} repeats ${ID_HEADER} "${id}"`);
-    seen.add(id);
-
-    values.push(headers.map((_, j) => (row[j] ? row[j] : null)));
+    values.push(
+      headers.map((_, j) => (row[j] && row[j].trim() !== "" ? row[j].trim() : null))
+    );
   });
 
   return { headers, values };

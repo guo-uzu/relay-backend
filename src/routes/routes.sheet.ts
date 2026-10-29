@@ -2,13 +2,14 @@ import express, { type Router, type Request, type Response } from "express";
 import { ImportSheetBody, SetSheetId } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
-import { sheet } from "../db/app.schema.ts";
 import { validateUserOrgRole } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { getTabRows, getTabs } from "../services/googleSheets.service.ts";
-import { parseSheetRows, SheetImportError} from "../lib/sheetImport.ts";
+import { parseSheetRows, SheetImportError } from "../lib/sheetImport.ts";
 import { SheetPayloadSchema } from "../lib/validations.ts";
+import { sheet, history } from "../db/app.schema.ts";
+
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
 
@@ -30,8 +31,41 @@ export interface LogEntry {
   @param :id is the id of the organization
 */
 
+routerSheets.get("/:id", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  try {
+    const sheetsList = await db
+      .select({
+        id: sheet.id,
+        name: sheet.nameSheet,
+        importedAt: sheet.importedAt,
+        values: sheet.values,
+      })
+      .from(sheet)
+      .where(eq(sheet.organizationId, organizationId));
+
+    const result = sheetsList.map((s) => ({
+      id: s.id,
+      name: s.name,
+      importedAt: s.importedAt ? s.importedAt.toISOString() : null,
+      rowCount: Array.isArray(s.values) ? s.values.length : 0,
+    }));
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error al obtener las hojas:", error);
+    return res.status(500).json({ message: "Error fetching sheets" });
+  }
+});
+
 routerSheets.post("/updates", async (req: Request, res: Response) => {
-  console.log(req.body)
+  console.log(req.body);
   const result = SheetPayloadSchema.safeParse(req.body);
 
   if (!result.success) {
@@ -41,7 +75,7 @@ routerSheets.post("/updates", async (req: Request, res: Response) => {
     });
   }
 
-  console.log(result.data)
+  console.log(result.data);
   return res.status(200).json({
     message: "Webhook processed successfully",
   });
@@ -62,13 +96,15 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
 
   if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES)))
     return res.status(403).json({ message: "Forbidden" });
+
   const spreadsheetId = result.data.sheetId;
   const spreadsheetName = result.data.nameSheet;
+
   try {
     const tab = (await getTabs(spreadsheetId)).find(
       (t) => t.title === spreadsheetName,
     );
-    console.log(tab)
+
     if (!tab) {
       return res.status(404).json({ message: "Tab not found in spreadsheet" });
     }
@@ -92,17 +128,23 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
       });
     }
 
-    // shortcut: check-then-insert can race and register twice; add a unique (organization_id, sheet_id, google_tab_id) index to close it
     const [created] = await db
       .insert(sheet)
       .values({
         sheetId: spreadsheetId,
         googleTabId: tab.id,
-        name: tab.title,
+        nameSheet: tab.title,
         organizationId: organizationId,
         userId: user.id,
       })
       .returning({ id: sheet.id });
+
+    // TRACKING: Registro de la conexión en history
+    await db.insert(history).values({
+      userId: user.id,
+      organizationId: organizationId,
+      action: `Conectó la pestaña "${tab.title}" de la hoja (${spreadsheetId})`,
+    });
 
     return res.status(201).json({
       message: "id added",
@@ -126,9 +168,7 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
     });
   }
 
-  if (
-    !(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))
-  ) {
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
     return res.status(403).json({
       message: "Forbidden",
     });
@@ -172,12 +212,18 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
       await getTabRows(connection.sheetId, tab.title),
     );
 
-    // one UPDATE is atomic: any earlier failure leaves the previous snapshot untouched
     const importedAt = new Date();
     await db
       .update(sheet)
-      .set({ name: tab.title, headers, values, importedAt })
+      .set({ nameSheet: tab.title, headers, values, importedAt })
       .where(eq(sheet.id, connection.id));
+
+    // TRACKING: Registro de la importación en history
+    await db.insert(history).values({
+      userId: user.id,
+      organizationId: organizationId,
+      action: `Importó ${values.length} filas en la hoja "${tab.title}"`,
+    });
 
     return res.status(200).json({
       message: "Sheet imported",
@@ -189,6 +235,80 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
     }
     console.error(error);
     return res.status(500).json({ message: "Error importing sheet" });
+  }
+});
+
+routerSheets.get("/:id/:sheetId/rows", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const sheetRecordId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  try {
+    const [sheetData] = await db
+      .select({
+        name: sheet.nameSheet,
+        headers: sheet.headers,
+        values: sheet.values,
+      })
+      .from(sheet)
+      .where(
+        and(
+          eq(sheet.id, sheetRecordId),
+          eq(sheet.organizationId, organizationId),
+        ),
+      );
+
+    if (!sheetData) {
+      return res.status(404).json({ message: "Sheet not found" });
+    }
+
+    const headers = sheetData.headers ?? [];
+    const rawValues = Array.isArray(sheetData.values) ? sheetData.values : [];
+
+    const rows = rawValues.map((row, index) => ({
+      n: index + 1,
+      cells: row.map((cell) => cell ?? ""),
+    }));
+
+    return res.status(200).json({
+      sheetName: sheetData.name,
+      headers,
+      rows,
+      total: rows.length,
+    });
+  } catch (error) {
+    console.error("Error al obtener las filas:", error);
+    return res.status(500).json({ message: "Error fetching sheet rows" });
+  }
+});
+routerSheets.get("/:id/history", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const currentUser = res.locals.user as User;
+
+  if (!(await validateUserOrgRole(organizationId, currentUser.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  try {
+    const logs = await db
+      .select({
+        id: history.id,
+        action: history.action,
+        createdAt: history.createdAt,
+      })
+      .from(history)
+      .where(eq(history.organizationId, organizationId))
+      .orderBy(desc(history.createdAt))
+      .limit(30);
+
+    return res.status(200).json(logs);
+  } catch (error) {
+    console.error("Error al obtener historial:", error);
+    return res.status(500).json({ message: "Error fetching history" });
   }
 });
 
