@@ -41,7 +41,6 @@ routerSheets.post("/updates", async (req: Request, res: Response) => {
     });
   }
 
-  console.log(result.data)
   return res.status(200).json({
     message: "Webhook processed successfully",
   });
@@ -54,20 +53,20 @@ routerSheets.post("/:id/test-sheet", async (req: Request, res: Response) => {
   if (!result.success) {
     return res.status(400).json({
       message: "Incomplete data sended",
-      error: z.flattenError(result.error).fieldErrors,
+      code: "BAD REQUEST"
     });
   }
 
   const user = res.locals.user as User;
 
   if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES)))
-    return res.status(403).json({ message: "Forbidden" });
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
 
   try {
     await getTabs(result.data.sheetId);
-    return res.json(true);
+    return res.json({ message: "Sheet is accessible", data: true });
   } catch {
-    return res.json(false);
+    return res.json({ message: "Sheet is not accessible", data: false, code: "BAD REQUEST" });
   }
 });
 
