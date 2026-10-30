@@ -1,5 +1,5 @@
 import express, { type Router, type Request, type Response } from "express";
-import { ImportSheetBody, SetSheetId } from "../lib/validations.ts";
+import { ImportSheetBody, SetSheetId, TestSheetId } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
 import { sheet } from "../db/app.schema.ts";
@@ -45,6 +45,30 @@ routerSheets.post("/updates", async (req: Request, res: Response) => {
   return res.status(200).json({
     message: "Webhook processed successfully",
   });
+});
+
+routerSheets.post("/:id/test-sheet", async (req: Request, res: Response) => {
+  const result = TestSheetId.safeParse(req.body);
+  const organizationId = req.params.id as string;
+
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Incomplete data sended",
+      error: z.flattenError(result.error).fieldErrors,
+    });
+  }
+
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES)))
+    return res.status(403).json({ message: "Forbidden" });
+
+  try {
+    await getTabs(result.data.sheetId);
+    return res.json(true);
+  } catch {
+    return res.json(false);
+  }
 });
 
 routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {

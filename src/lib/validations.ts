@@ -11,6 +11,10 @@ export const ImportSheetBody = z.object({
   connectionId: z.string().min(1, "Connection id is required"),
 })
 
+export const TestSheetId = z.object({
+  sheetId: z.string().regex(/^[a-zA-Z0-9_-]{40,50}$/, "Invalid sheet id"),
+})
+
 export const SheetPayloadSchema = z.object({
   sheetId: z.string(),
   meta: z.any(),

@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response } from "express";
+import cors from "cors"
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.ts";
 import { routerSheets } from "./routes/routes.sheet.ts";
@@ -10,6 +11,11 @@ import cookieParser from "cookie-parser";
 const app: Express = express();
 
 app.use(pinoHttp({ logger }));
+app.use(cors({
+  origin: "http://localhost:5173",
+  optionsSuccessStatus: 200,
+  credentials: true,
+}))
 // auth
 app.all("/api/v1/auth/{*any}", toNodeHandler(auth));
 

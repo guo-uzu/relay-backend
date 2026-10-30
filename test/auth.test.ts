@@ -69,4 +69,20 @@ describe("Sheet operations", { timeout: 15_000 }, () => {
       .send({ connectionId })
       .expect(200);
   });
+
+  it("Should return true when the sheet is reachable", async () => {
+    const res = await client
+      .post(`${SHEETS}/${org.body.id}/test-sheet`)
+      .send({ sheetId: id })
+      .expect(200);
+    expect(res.body).toBe(true);
+  });
+
+  it("Should return false when the sheet is not reachable", async () => {
+    const res = await client
+      .post(`${SHEETS}/${org.body.id}/test-sheet`)
+      .send({ sheetId: "a".repeat(44) })
+      .expect(200);
+    expect(res.body).toBe(false);
+  });
 });
