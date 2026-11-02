@@ -43,12 +43,39 @@ export const history = pgTable("history", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => generateId()),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id),
   organizationId: text("organization_id")
     .notNull()
     .references(() => organization.id),
-  action: text().notNull(),
+  // relay user when the action came from Relay; nullable because Google Sheets
+  // changes are attributed to Google accounts, which do not always map to a member
+  userId: text("user_id").references(() => user.id),
+  // the sheet connection this event belongs to (nullable for org-level events)
+  sheetId: text("sheet_id").references(() => sheet.id),
+  // typed action so the dashboard can group/count without parsing text:
+  // 'agregado' | 'editado' | 'eliminado' | 'importado' | 'conectado'
+  eventType: text("event_type").notNull(),
+  // who did it: Google display name/email, or the relay user's
+  actorName: text("actor_name"),
+  actorEmail: text("actor_email"),
+  // optional human-readable summary for events that are not a single cell change
+  // (e.g. "Importó 50 filas" / "Conectó la pestaña X")
+  action: text("action"),
+  // cell-level detail: 1-based row, 1-based column index (sheets often have no
+  // header row) + optional header name when it is known
+  rowNumber: integer("row_number"),
+  columnIndex: integer("column_index"),
+  columnName: text("column_name"),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  // 'google_sheets' | 'relay'
+  source: text("source").notNull().default("google_sheets"),
+  // when the change happened (from the payload) vs when we stored it
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  // keep the original change object so we can re-parse later without loss
+  rawPayload: jsonb("raw_payload"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("history_org_occurred_idx").using("btree", table.organizationId, table.occurredAt),
+  index("history_org_type_occurred_idx").using("btree", table.organizationId, table.eventType, table.occurredAt),
+  index("history_sheet_occurred_idx").using("btree", table.sheetId, table.occurredAt),
+]);

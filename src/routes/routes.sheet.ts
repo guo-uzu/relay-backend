@@ -121,7 +121,7 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
       .values({
         sheetId: spreadsheetId,
         googleTabId: tab.id,
-        name: tab.title,
+        nameSheet: tab.title,
         organizationId: organizationId,
         userId: user.id,
       })
@@ -199,7 +199,7 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
     const importedAt = new Date();
     await db
       .update(sheet)
-      .set({ name: tab.title, headers, values, importedAt })
+      .set({ nameSheet: tab.title, headers, values, importedAt })
       .where(eq(sheet.id, connection.id));
 
     return res.status(200).json({
