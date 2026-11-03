@@ -21,3 +21,21 @@ export async function getTabRows(spreadsheetId: string, tabTitle: string) {
 
   return (data.values ?? []) as string[][];
 }
+
+export async function appendTabRow(
+  spreadsheetId: string,
+  tabTitle: string,
+  cells: string[],
+) {
+  const { data } = await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `'${tabTitle.replaceAll("'", "''")}'`,
+    // RAW keeps app input from being evaluated as a formula in the sheet
+    valueInputOption: "RAW",
+    requestBody: { values: [cells] },
+  });
+
+  // updatedRange looks like "'Tab'!A15:G15"
+  const row = Number(data.updates?.updatedRange?.match(/![A-Z]+(\d+)/)?.[1]);
+  return { rowNumber: Number.isInteger(row) ? row : null };
+}

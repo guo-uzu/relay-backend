@@ -1,15 +1,22 @@
 import express, { type Router, type Request, type Response } from "express";
-import { randomBytes } from "node:crypto";
-import { ImportSheetBody, SetSheetId, TestSheetId } from "../lib/validations.ts";
+import { randomBytes, randomUUID } from "node:crypto";
+import {
+  AppendRowsSchema,
+  ImportSheetBody,
+  RowsQuerySchema,
+  SetSheetId,
+  TestSheetId,
+} from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
 import { validateUserOrgRole } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { eq, and } from "drizzle-orm";
-import { getTabRows, getTabs } from "../services/googleSheets.service.ts";
+import { appendTabRow, getTabRows, getTabs } from "../services/googleSheets.service.ts";
 import { parseSheetRows, SheetImportError} from "../lib/sheetImport.ts";
 import { listSheets } from "../lib/sheetsList.ts";
+import { searchRows } from "../lib/rowsTable.ts";
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
 const MEMBER_ROLES = [...ORGANIZATION_ROLES, "member"];
@@ -27,6 +34,155 @@ routerSheets.get("/:id/sheets", async (req: Request, res: Response) => {
 
   return res.json(await listSheets(organizationId));
 });
+
+routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrgRole(organizationId, user.id, MEMBER_ROLES)))
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+
+  const result = RowsQuerySchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Invalid query",
+      error: z.flattenError(result.error).fieldErrors,
+    });
+  }
+
+  const [connection] = await db
+    .select({
+      headers: sheet.headers,
+      values: sheet.values,
+      nameSheet: sheet.nameSheet,
+    })
+    .from(sheet)
+    .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)))
+    .limit(1);
+
+  if (!connection)
+    return res.status(404).json({ message: "Sheet connection not found" });
+
+  const headers = connection.headers ?? [];
+  return res.json({
+    headers,
+    ...searchRows(headers, connection.values, result.data),
+    sheetName: connection.nameSheet,
+  });
+});
+
+routerSheets.post(
+  "/:id/sheets/:sheetId/rows/append",
+  async (req: Request, res: Response) => {
+    const organizationId = req.params.id as string;
+    const sheetId = req.params.sheetId as string;
+    const user = res.locals.user as User;
+
+    if (!(await validateUserOrgRole(organizationId, user.id, MEMBER_ROLES)))
+      return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+
+    const result = AppendRowsSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Invalid row",
+        error: z.flattenError(result.error).fieldErrors,
+      });
+    }
+
+    const [connection] = await db
+      .select({
+        id: sheet.id,
+        sheetId: sheet.sheetId,
+        googleTabId: sheet.googleTabId,
+        nameSheet: sheet.nameSheet,
+        headers: sheet.headers,
+        values: sheet.values,
+      })
+      .from(sheet)
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)))
+      .limit(1);
+
+    if (!connection)
+      return res.status(404).json({ message: "Sheet connection not found" });
+    if (connection.googleTabId === null)
+      return res
+        .status(409)
+        .json({ message: "Connection has no tab id, register the sheet again" });
+    if (!connection.headers || !connection.values)
+      return res.status(409).json({ message: "Import the sheet before adding rows" });
+
+    const googleTabId = connection.googleTabId;
+    const headers = connection.headers;
+    const values = connection.values;
+    const idIndex = headers.indexOf("_id");
+    if (idIndex === -1)
+      return res.status(409).json({ message: "Sheet has no _id column" });
+
+    const cells = headers.map((_, i) => result.data.cells[i] ?? "");
+    const id = cells[idIndex]!.trim();
+    if (id) {
+      if (values.some((row) => row[idIndex] === id))
+        return res.status(409).json({ message: `Duplicate _id "${id}"` });
+    } else {
+      // new rows get their stable key here so the user does not have to invent one
+      cells[idIndex] = randomUUID();
+    }
+
+    let tab: { id: number; title: string } | undefined;
+    try {
+      tab = (await getTabs(connection.sheetId)).find((t) => t.id === googleTabId);
+    } catch (error) {
+      console.error(error);
+      return res.status(502).json({ message: "Could not reach the spreadsheet" });
+    }
+    if (!tab) return res.status(404).json({ message: "Tab not found in spreadsheet" });
+
+    let rowNumber: number | null = null;
+    try {
+      rowNumber = (await appendTabRow(connection.sheetId, tab.title, cells)).rowNumber;
+    } catch (error) {
+      console.error(error);
+      return res.status(502).json({ message: "Could not add the row to Google" });
+    }
+
+    // The row is already in Google, so a failure here must not look like a failed write.
+    try {
+      const { headers: nextHeaders, values: nextValues } = parseSheetRows(
+        await getTabRows(connection.sheetId, tab.title),
+      );
+      const importedAt = new Date();
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(sheet)
+          .set({ nameSheet: tab.title, headers: nextHeaders, values: nextValues, importedAt })
+          .where(eq(sheet.id, connection.id));
+
+        await tx.insert(history).values({
+          organizationId,
+          userId: user.id,
+          sheetId: connection.id,
+          eventType: "agregado",
+          actorName: user.name,
+          actorEmail: user.email,
+          rowNumber: rowNumber ?? nextValues.length + 1,
+          newValue: cells[idIndex]!,
+          source: "relay",
+          rawPayload: { cells },
+        });
+      });
+
+      return res.status(201).json({ message: "Row added", data: { row: rowNumber } });
+    } catch (error) {
+      console.error(error);
+      const reason = error instanceof SheetImportError ? `: ${error.message}` : "";
+      return res.status(500).json({
+        message: `Row added to Google, but the local copy could not be refreshed${reason}; re-import the sheet`,
+      });
+    }
+  },
+);
 
 routerSheets.post("/:id/test-sheet", async (req: Request, res: Response) => {
   const result = TestSheetId.safeParse(req.body);
