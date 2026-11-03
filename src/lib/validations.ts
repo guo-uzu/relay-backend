@@ -15,6 +15,30 @@ export const TestSheetId = z.object({
   sheetId: z.string().regex(/^[a-zA-Z0-9_-]{40,50}$/, "Invalid sheet id"),
 })
 
+export const SheetRowFilter = z.object({
+  column: z.string(),
+  op: z.enum(["contains", "equals", "startsWith", "gt", "lt", "isEmpty"]),
+  value: z.string().default(""),
+});
+
+export const SheetRowsBody = z.object({
+  terms: z.array(z.string()).default([]),
+  mode: z.enum(["and", "or"]).default("and"),
+  filters: z.array(SheetRowFilter).default([]),
+  fmode: z.enum(["and", "or"]).default("and"),
+  sort: z.string().nullish(),
+  dir: z.enum(["asc", "desc"]).default("asc"),
+  page: z.number().int().positive().default(1),
+  size: z.number().int().positive().default(20),
+});
+
+export const AppendRowBody = z.object({
+  cells: z.union([
+    z.array(z.string()),
+    z.record(z.string(), z.string()),
+  ]),
+});
+
 export const SheetPayloadSchema = z.object({
   sheetId: z.string(),
   meta: z.any(),
