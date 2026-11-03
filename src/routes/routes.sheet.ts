@@ -1,50 +1,20 @@
 import express, { type Router, type Request, type Response } from "express";
+import { randomBytes } from "node:crypto";
 import { ImportSheetBody, SetSheetId, TestSheetId } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
-import { sheet } from "../db/app.schema.ts";
+import { history, sheet } from "../db/app.schema.ts";
 import { validateUserOrgRole } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { eq, and } from "drizzle-orm";
 import { getTabRows, getTabs } from "../services/googleSheets.service.ts";
 import { parseSheetRows, SheetImportError} from "../lib/sheetImport.ts";
-import { SheetPayloadSchema } from "../lib/validations.ts";
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
-
-// Interfaz para el JSON de respuesta del Webhook
-export interface LogEntry {
-  id: string;
-  user: string;
-  trigger: string;
-  timestamp: string;
-  row: number;
-  column: string;
-  modification: {
-    old: unknown;
-    new: unknown;
-  } | unknown;
-}
 
 /*
   @param :id is the id of the organization
 */
-
-routerSheets.post("/updates", async (req: Request, res: Response) => {
-  console.log(req.body)
-  const result = SheetPayloadSchema.safeParse(req.body);
-
-  if (!result.success) {
-    return res.status(400).json({
-      message: "Invalid payload format",
-      error: z.flattenError(result.error).fieldErrors,
-    });
-  }
-
-  return res.status(200).json({
-    message: "Webhook processed successfully",
-  });
-});
 
 routerSheets.post("/:id/test-sheet", async (req: Request, res: Response) => {
   const result = TestSheetId.safeParse(req.body);
@@ -97,7 +67,7 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
     }
 
     const [existing] = await db
-      .select({ id: sheet.id })
+      .select({ id: sheet.id, webhookToken: sheet.webhookToken })
       .from(sheet)
       .where(
         and(
@@ -109,27 +79,52 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
       .limit(1);
 
     if (existing) {
+      // connections created before webhook tokens existed get one on demand
+      const webhookToken = existing.webhookToken ?? randomBytes(24).toString("base64url");
+      if (!existing.webhookToken) {
+        await db.update(sheet).set({ webhookToken }).where(eq(sheet.id, existing.id));
+      }
       return res.status(200).json({
         message: "Sheet already registered",
-        data: { connectionId: existing.id, spreadsheetId },
+        data: { connectionId: existing.id, spreadsheetId, webhookToken },
       });
     }
 
     // shortcut: check-then-insert can race and register twice; add a unique (organization_id, sheet_id, google_tab_id) index to close it
-    const [created] = await db
-      .insert(sheet)
-      .values({
-        sheetId: spreadsheetId,
-        googleTabId: tab.id,
-        nameSheet: tab.title,
-        organizationId: organizationId,
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(sheet)
+        .values({
+          sheetId: spreadsheetId,
+          googleTabId: tab.id,
+          nameSheet: tab.title,
+          organizationId: organizationId,
+          userId: user.id,
+          webhookToken: randomBytes(24).toString("base64url"),
+        })
+        .returning({ id: sheet.id, webhookToken: sheet.webhookToken });
+
+      await tx.insert(history).values({
+        organizationId,
         userId: user.id,
-      })
-      .returning({ id: sheet.id });
+        sheetId: row!.id,
+        eventType: "conectado",
+        actorName: user.name,
+        actorEmail: user.email,
+        source: "relay",
+        action: `Conectó la pestaña "${tab.title}"`,
+      });
+
+      return row!;
+    });
 
     return res.status(201).json({
       message: "id added",
-      data: { connectionId: created!.id, spreadsheetId },
+      data: {
+        connectionId: created.id,
+        spreadsheetId,
+        webhookToken: created.webhookToken,
+      },
     });
   } catch (error) {
     console.error(error);
@@ -197,10 +192,23 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
 
     // one UPDATE is atomic: any earlier failure leaves the previous snapshot untouched
     const importedAt = new Date();
-    await db
-      .update(sheet)
-      .set({ nameSheet: tab.title, headers, values, importedAt })
-      .where(eq(sheet.id, connection.id));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(sheet)
+        .set({ nameSheet: tab.title, headers, values, importedAt })
+        .where(eq(sheet.id, connection.id));
+
+      await tx.insert(history).values({
+        organizationId,
+        userId: user.id,
+        sheetId: connection.id,
+        eventType: "importado",
+        actorName: user.name,
+        actorEmail: user.email,
+        source: "relay",
+        action: `Importó ${values.length} filas de la pestaña "${tab.title}"`,
+      });
+    });
 
     return res.status(200).json({
       message: "Sheet imported",
