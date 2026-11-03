@@ -9,12 +9,24 @@ import type { User } from "better-auth";
 import { eq, and } from "drizzle-orm";
 import { getTabRows, getTabs } from "../services/googleSheets.service.ts";
 import { parseSheetRows, SheetImportError} from "../lib/sheetImport.ts";
+import { listSheets } from "../lib/sheetsList.ts";
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
+const MEMBER_ROLES = [...ORGANIZATION_ROLES, "member"];
 
 /*
   @param :id is the id of the organization
 */
+
+routerSheets.get("/:id/sheets", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrgRole(organizationId, user.id, MEMBER_ROLES)))
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+
+  return res.json(await listSheets(organizationId));
+});
 
 routerSheets.post("/:id/test-sheet", async (req: Request, res: Response) => {
   const result = TestSheetId.safeParse(req.body);
@@ -207,6 +219,8 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
         actorEmail: user.email,
         source: "relay",
         action: `Importó ${values.length} filas de la pestaña "${tab.title}"`,
+        // the dashboard shows "importó N filas"; keep N out of the text
+        rawPayload: { rows: values.length },
       });
     });
 
