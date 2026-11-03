@@ -22,11 +22,12 @@ export const sheet = pgTable("sheet", {
     .notNull()
     .references(() => user.id),
   nameSheet: text("name").notNull(),
+  rowCount: integer("row_count").notNull().default(0),
   // nullable: rows registered before the import feature have no tab id
   googleTabId: integer("google_tab_id"),
   headers: text("headers").array(),
-  // shortcut: whole snapshot in one jsonb (rows are arrays aligned with headers), every import rewrites it; split into a sheet_row table when per-row edits, search or paging are needed
-  values: jsonb("values").$type<(string | null)[][]>(),
+  // shortcut: whole snapshot in one jsonb ({ n: sheet row number, cells: raw API row }), every import rewrites it; split into a sheet_row table when per-row edits, search or paging are needed
+  values: jsonb("values").$type<{ n: number; cells: string[] }[]>(),
   importedAt: timestamp("imported_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
