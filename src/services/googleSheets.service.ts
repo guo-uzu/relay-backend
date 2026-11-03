@@ -21,3 +21,17 @@ export async function getTabRows(spreadsheetId: string, tabTitle: string) {
 
   return (data.values ?? []) as string[][];
 }
+
+export async function appendTabRow(
+  spreadsheetId: string,
+  tabTitle: string,
+  cells: string[],
+) {
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `'${tabTitle.replaceAll("'", "''")}'`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [cells] },
+  });
+}
