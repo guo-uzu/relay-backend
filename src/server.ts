@@ -4,6 +4,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.ts";
 import { routerSheets } from "./routes/routes.sheet.ts";
 import { routerWebhook } from "./routes/routes.webhook.ts";
+import { routerOrgs } from "./routes/routes.orgs.ts";
 import { requireAuth } from "./middlewares/auth.session.ts";
 import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger.ts";
@@ -26,6 +27,7 @@ app.use(cookieParser());
 
 // functionalities
 app.use("/api/v1/google-sheets", requireAuth, routerSheets);
+app.use("/api/v1/orgs", requireAuth, routerOrgs);
 app.use("/api/v1/webhook", routerWebhook)
 
 app.listen(3000);
