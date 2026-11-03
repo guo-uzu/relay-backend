@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -28,6 +29,10 @@ export const sheet = pgTable("sheet", {
   // shortcut: whole snapshot in one jsonb (rows are arrays aligned with headers), every import rewrites it; split into a sheet_row table when per-row edits, search or paging are needed
   values: jsonb("values").$type<(string | null)[][]>(),
   importedAt: timestamp("imported_at"),
+  // bearer token sent by the Apps Script in the X-Webhook-Token header; it both
+  // authenticates and identifies the connection (see routes.webhook.ts)
+  // shortcut: stored in plaintext so the UI can show it again, hash it when tokens get rotated
+  webhookToken: text("webhook_token"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -36,7 +41,8 @@ export const sheet = pgTable("sheet", {
 }, (table) => [
   index("organization_sheet_name_idx")
     .using("btree", table.organizationId, table.sheetId, sql`lower(${table.nameSheet})`),
-  index("values_idx").using("gin", table.values)
+  index("values_idx").using("gin", table.values),
+  uniqueIndex("sheet_webhook_token_uidx").on(table.webhookToken),
 ]);
 
 export const history = pgTable("history", {
@@ -71,6 +77,9 @@ export const history = pgTable("history", {
   source: text("source").notNull().default("google_sheets"),
   // when the change happened (from the payload) vs when we stored it
   occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  // id given by the source for this change; retries of the same change collide
+  // on the unique index below instead of duplicating the event
+  externalId: text("external_id"),
   // keep the original change object so we can re-parse later without loss
   rawPayload: jsonb("raw_payload"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -78,4 +87,7 @@ export const history = pgTable("history", {
   index("history_org_occurred_idx").using("btree", table.organizationId, table.occurredAt),
   index("history_org_type_occurred_idx").using("btree", table.organizationId, table.eventType, table.occurredAt),
   index("history_sheet_occurred_idx").using("btree", table.sheetId, table.occurredAt),
+  uniqueIndex("history_sheet_external_uidx")
+    .on(table.sheetId, table.externalId)
+    .where(sql`${table.externalId} is not null`),
 ]);
