@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -70,6 +71,9 @@ export const history = pgTable("history", {
   source: text("source").notNull().default("google_sheets"),
   // when the change happened (from the payload) vs when we stored it
   occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  // id given by the source for this change; retries of the same change collide
+  // on the unique index below instead of duplicating the event
+  externalId: text("external_id"),
   // keep the original change object so we can re-parse later without loss
   rawPayload: jsonb("raw_payload"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -77,4 +81,7 @@ export const history = pgTable("history", {
   index("history_org_occurred_idx").using("btree", table.organizationId, table.occurredAt),
   index("history_org_type_occurred_idx").using("btree", table.organizationId, table.eventType, table.occurredAt),
   index("history_sheet_occurred_idx").using("btree", table.sheetId, table.occurredAt),
+  uniqueIndex("history_sheet_external_uidx")
+    .on(table.sheetId, table.externalId)
+    .where(sql`${table.externalId} is not null`),
 ]);
