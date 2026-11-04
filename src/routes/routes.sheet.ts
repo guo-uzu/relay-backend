@@ -2,13 +2,12 @@ import express, { type Router, type Request, type Response } from "express";
 import { AppendRowBody, ImportSheetBody, SetSheetId, SheetRowsBody, TestSheetId } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
-import { sheet } from "../db/app.schema.ts";
+import { history, sheet } from "../db/app.schema.ts";
 import { validateUserOrg, validateUserOrgRole } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { eq, and, sql, type SQL } from "drizzle-orm";
 import { getTabRows, getTabs, appendTabRow } from "../services/googleSheets.service.ts";
 import { parseSheetRows, SheetImportError, type SheetRow } from "../lib/sheetImport.ts";
-import { SheetPayloadSchema } from "../lib/validations.ts";
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
 
@@ -22,39 +21,9 @@ const containsPattern = (value: string) =>
 const startsWithPattern = (value: string) =>
   sql`${foldSql(sql`${escapeLike(value)}`)} || '%'`;
 
-// Interfaz para el JSON de respuesta del Webhook
-export interface LogEntry {
-  id: string;
-  user: string;
-  trigger: string;
-  timestamp: string;
-  row: number;
-  column: string;
-  modification: {
-    old: unknown;
-    new: unknown;
-  } | unknown;
-}
-
 /*
   @param :id is the id of the organization
 */
-
-routerSheets.post("/updates", async (req: Request, res: Response) => {
-  console.log(req.body)
-  const result = SheetPayloadSchema.safeParse(req.body);
-
-  if (!result.success) {
-    return res.status(400).json({
-      message: "Invalid payload format",
-      error: z.flattenError(result.error).fieldErrors,
-    });
-  }
-
-  return res.status(200).json({
-    message: "Webhook processed successfully",
-  });
-});
 
 routerSheets.post("/:id/test-sheet", async (req: Request, res: Response) => {
   const result = TestSheetId.safeParse(req.body);
@@ -101,7 +70,6 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
     const tab = (await getTabs(spreadsheetId)).find(
       (t) => t.title === spreadsheetName,
     );
-    console.log(tab)
     if (!tab) {
       return res.status(404).json({ message: "Tab not found in spreadsheet" });
     }
@@ -126,20 +94,35 @@ routerSheets.post("/:id/set-sheet-id", async (req: Request, res: Response) => {
     }
 
     // shortcut: check-then-insert can race and register twice; add a unique (organization_id, sheet_id, google_tab_id) index to close it
-    const [created] = await db
-      .insert(sheet)
-      .values({
-        sheetId: spreadsheetId,
-        googleTabId: tab.id,
-        nameSheet: tab.title,
-        organizationId: organizationId,
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(sheet)
+        .values({
+          sheetId: spreadsheetId,
+          googleTabId: tab.id,
+          nameSheet: tab.title,
+          organizationId: organizationId,
+          userId: user.id,
+        })
+        .returning({ id: sheet.id });
+
+      await tx.insert(history).values({
+        organizationId,
         userId: user.id,
-      })
-      .returning({ id: sheet.id });
+        sheetId: row!.id,
+        eventType: "conectado",
+        actorName: user.name,
+        actorEmail: user.email,
+        source: "relay",
+        action: `Conectó la pestaña "${tab.title}"`,
+      });
+
+      return row!;
+    });
 
     return res.status(201).json({
       message: "id added",
-      data: { connectionId: created!.id, spreadsheetId },
+      data: { connectionId: created.id, spreadsheetId },
     });
   } catch (error) {
     console.error(error);
@@ -432,26 +415,46 @@ routerSheets.post(
       }
 
       try {
-        const [updated] = await db
-          .update(sheet)
-          .set({
-            values: sql`coalesce(${sheet.values}, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-              'n',
-              (
-                select coalesce(max((entry->>'n')::int), 0) + 1
-                from jsonb_array_elements(coalesce(${sheet.values}, '[]'::jsonb)) as entry
-              ),
-              'cells',
-              ${JSON.stringify(cells)}::jsonb
-            ))`,
-            rowCount: sql`${sheet.rowCount} + 1`,
-          })
-          .where(
-            and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
-          )
-          .returning({
-            n: sql<number>`(${sheet.values}->-1->>'n')::int`,
+        const updated = await db.transaction(async (tx) => {
+          const [row] = await tx
+            .update(sheet)
+            .set({
+              values: sql`coalesce(${sheet.values}, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+                'n',
+                (
+                  select coalesce(max((entry->>'n')::int), 0) + 1
+                  from jsonb_array_elements(coalesce(${sheet.values}, '[]'::jsonb)) as entry
+                ),
+                'cells',
+                ${JSON.stringify(cells)}::jsonb
+              ))`,
+              rowCount: sql`${sheet.rowCount} + 1`,
+            })
+            .where(
+              and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
+            )
+            .returning({
+              n: sql<number>`(${sheet.values}->-1->>'n')::int`,
+            });
+
+          if (!row) return null;
+
+          await tx.insert(history).values({
+            organizationId,
+            userId: user.id,
+            sheetId: connection.id,
+            eventType: "agregado",
+            actorName: user.name,
+            actorEmail: user.email,
+            rowNumber: row.n,
+            newValue: cells.filter(Boolean).join(" · "),
+            source: "relay",
+            action: `Agregó una fila a la pestaña "${tab.title}"`,
+            rawPayload: { cells },
           });
+
+          return row;
+        });
 
         if (!updated) {
           return res.status(404).json({
@@ -550,10 +553,24 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
 
     // one UPDATE is atomic: any earlier failure leaves the previous snapshot untouched
     const importedAt = new Date();
-    await db
-      .update(sheet)
-      .set({ nameSheet: tab.title, headers, values, importedAt, rowCount: values.length })
-      .where(eq(sheet.id, connection.id));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(sheet)
+        .set({ nameSheet: tab.title, headers, values, importedAt, rowCount: values.length })
+        .where(eq(sheet.id, connection.id));
+
+      await tx.insert(history).values({
+        organizationId,
+        userId: user.id,
+        sheetId: connection.id,
+        eventType: "importado",
+        actorName: user.name,
+        actorEmail: user.email,
+        source: "relay",
+        action: `Importó ${values.length} filas de la pestaña "${tab.title}"`,
+        rawPayload: { rows: values.length },
+      });
+    });
 
     return res.status(200).json({
       message: "Sheet imported",

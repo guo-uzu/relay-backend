@@ -39,8 +39,24 @@ export const AppendRowBody = z.object({
   ]),
 });
 
-export const SheetPayloadSchema = z.object({
-  sheetId: z.string(),
-  meta: z.any(),
-  changes: z.any()
-})
+export const WebhookEventSchema = z.object({
+  // deterministic id from the source; retries reuse it and the DB ignores the duplicate
+  externalId: z.string().min(1),
+  type: z.enum(["agregado", "editado", "eliminado"]),
+  actorName: z.string().nullish(),
+  actorEmail: z.string().nullish(),
+  rowNumber: z.number().int().positive().nullish(),
+  columnIndex: z.number().int().positive().nullish(),
+  columnName: z.string().nullish(),
+  oldValue: z.string().nullish(),
+  newValue: z.string().nullish(),
+  occurredAt: z.iso.datetime({ offset: true }),
+});
+
+export type WebhookEvent = z.infer<typeof WebhookEventSchema>;
+
+export const WebhookPayload = z.object({
+  spreadsheetId: z.string().min(1),
+  tabId: z.number().int(),
+  event: WebhookEventSchema,
+});
