@@ -3,6 +3,7 @@ import { organization } from "better-auth/plugins";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter/relations-v2";
 import { db } from "../db/index.ts";
 import { account, invitation, member, organization as organizationTable, session, user, verification } from "../db/schema.ts";
+import { sendOrganizationInvitation } from "./email.ts";
 
 const trustedOriginsArray = ["http://localhost:5173"]
 const isProUser = (user: { plan?: string }) => user.plan === "pro";
@@ -34,6 +35,15 @@ export const auth = betterAuth({
     organization({
       organizationLimit: 1,
       membershipLimit: (user) => isProUser(user as unknown as { plan?: string }) ? 50 : 5,
+      async sendInvitationEmail(data) {
+        await sendOrganizationInvitation({
+          to: data.email,
+          organizationName: data.organization.name,
+          inviterName: data.inviter.user.name ?? "",
+          inviterEmail: data.inviter.user.email,
+          inviteLink: `${trustedOriginsArray[0]}/accept-invitation/${data.id}`,
+        });
+      },
     })
   ]
 });
