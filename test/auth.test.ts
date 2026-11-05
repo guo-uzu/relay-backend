@@ -75,7 +75,7 @@ describe("Sheet operations", { timeout: 15_000 }, () => {
       .post(`${SHEETS}/${org.body.id}/test-sheet`)
       .send({ sheetId: id })
       .expect(200);
-    expect(res.body).toBe(true);
+    expect(res.body.data).toBe(true);
   });
 
   it("Should return false when the sheet is not reachable", async () => {
@@ -83,6 +83,6 @@ describe("Sheet operations", { timeout: 15_000 }, () => {
       .post(`${SHEETS}/${org.body.id}/test-sheet`)
       .send({ sheetId: "a".repeat(44) })
       .expect(200);
-    expect(res.body).toBe(false);
+    expect(res.body.data).toBe(false);
   });
 });

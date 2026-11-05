@@ -29,7 +29,7 @@ export const sheet = pgTable("sheet", {
   headers: text("headers").array(),
   // shortcut: whole snapshot in one jsonb ({ n: sheet row number, cells: raw API row }), every import rewrites it; split into a sheet_row table when per-row edits, search or paging are needed
   values: jsonb("values").$type<{ n: number; cells: string[] }[]>(),
-  importedAt: timestamp("imported_at"),
+  importedAt: timestamp("imported_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -70,7 +70,9 @@ export const history = pgTable("history", {
   // 'google_sheets' | 'relay'
   source: text("source").notNull().default("google_sheets"),
   // when the change happened (from the payload) vs when we stored it
-  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   // id given by the source for this change; retries of the same change collide
   // on the unique index below instead of duplicating the event
   externalId: text("external_id"),

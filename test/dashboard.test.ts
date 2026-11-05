@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { toHistoryEvent, todayCounts } from "../src/lib/dashboard.ts";
+import { mxDayRange, toHistoryEvent, todayCounts } from "../src/lib/dashboard.ts";
+
+describe("mxDayRange", () => {
+  it("starts the day at midnight in Mexico City", () => {
+    // 05:30 UTC is still 23:30 of the previous day in CDMX
+    const late = mxDayRange(new Date("2026-11-05T05:30:00Z"));
+    expect(late.start.toISOString()).toBe("2026-11-04T06:00:00.000Z");
+    expect(late.end.toISOString()).toBe("2026-11-05T06:00:00.000Z");
+
+    // 07:30 UTC is already 01:30 of the next day in CDMX
+    const early = mxDayRange(new Date("2026-11-05T07:30:00Z"));
+    expect(early.start.toISOString()).toBe("2026-11-05T06:00:00.000Z");
+  });
+});
 
 describe("todayCounts", () => {
   it("counts the known event types for today", () => {

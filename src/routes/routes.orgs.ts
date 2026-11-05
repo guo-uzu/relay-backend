@@ -1,11 +1,16 @@
 import express, { type Request, type Response, type Router } from "express";
-import { and, count, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import type { User } from "better-auth";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
 import { member } from "../db/schema.ts";
 import { validateUserOrgRole } from "../lib/validate.user.org.ts";
-import { EVENT_TYPES, toHistoryEvent, todayCounts } from "../lib/dashboard.ts";
+import {
+  EVENT_TYPES,
+  mxDayRange,
+  toHistoryEvent,
+  todayCounts,
+} from "../lib/dashboard.ts";
 import { listSheets } from "../lib/sheetsList.ts";
 
 const routerOrgs: Router = express.Router();
@@ -19,9 +24,7 @@ routerOrgs.get("/:id/dashboard", async (req: Request, res: Response) => {
     return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
 
   try {
-    // "today" is the server's local day; the timestamps are stored without timezone
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const { start, end } = mxDayRange();
 
     const events = await db
       .select({
@@ -57,6 +60,7 @@ routerOrgs.get("/:id/dashboard", async (req: Request, res: Response) => {
         and(
           eq(history.organizationId, organizationId),
           gte(history.occurredAt, start),
+          lt(history.occurredAt, end),
           inArray(history.eventType, EVENT_TYPES),
         ),
       )

@@ -1,12 +1,12 @@
 import express, { type Router, type Request, type Response } from "express";
-import { AppendRowBody, ImportSheetBody, SetSheetId, SheetRowsBody, TestSheetId } from "../lib/validations.ts";
+import { ImportSheetBody, SetSheetId, SheetRowsBody, TestSheetId } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
 import { validateUserOrg, validateUserOrgRole } from "../lib/validate.user.org.ts";
 import type { User } from "better-auth";
 import { eq, and, sql, type SQL } from "drizzle-orm";
-import { getTabRows, getTabs, appendTabRow } from "../services/googleSheets.service.ts";
+import { getTabRows, getTabs } from "../services/googleSheets.service.ts";
 import { parseSheetRows, SheetImportError, type SheetRow } from "../lib/sheetImport.ts";
 const routerSheets: Router = express.Router();
 const ORGANIZATION_ROLES = ["admin", "owner"];
@@ -326,164 +326,6 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
     });
   }
 });
-
-routerSheets.post(
-  "/:id/sheets/:sheetId/rows/append",
-  async (req: Request, res: Response) => {
-    const result = AppendRowBody.safeParse(req.body);
-    const organizationId = req.params.id as string;
-    const sheetId = req.params.sheetId as string;
-    const user = res.locals.user as User;
-
-    if (!result.success) {
-      return res.status(400).json({
-        message: "Invalid request body",
-        code: "SHEET_APPEND_INVALID_REQUEST",
-      });
-    }
-
-    if (!(await validateUserOrg(organizationId, user.id))) {
-      return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
-    }
-
-    try {
-      const [connection] = await db
-        .select({
-          id: sheet.id,
-          sheetId: sheet.sheetId,
-          googleTabId: sheet.googleTabId,
-          headers: sheet.headers,
-        })
-        .from(sheet)
-        .where(
-          and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
-        )
-        .limit(1);
-
-      if (!connection) {
-        return res.status(404).json({
-          message: "Sheet connection not found",
-          code: "SHEET_NOT_FOUND",
-        });
-      }
-      if (connection.googleTabId === null) {
-        return res.status(409).json({
-          message: "Connection has no tab id, register the sheet again",
-          code: "SHEET_TAB_NOT_REGISTERED",
-        });
-      }
-
-      const headers = connection.headers ?? [];
-      if (!headers.length) {
-        return res.status(409).json({
-          message: "Import the sheet before adding rows",
-          code: "SHEET_NOT_IMPORTED",
-        });
-      }
-
-      const rawCells = result.data.cells;
-      const cells = headers.map((_, index) =>
-        Array.isArray(rawCells)
-          ? (rawCells[index] ?? "")
-          : (rawCells[String(index)] ?? ""),
-      );
-      if (!cells.some((cell) => cell.trim())) {
-        return res.status(400).json({
-          message: "Row is empty",
-          code: "SHEET_ROW_EMPTY",
-        });
-      }
-
-      const tab = (await getTabs(connection.sheetId)).find(
-        (t) => t.id === connection.googleTabId,
-      );
-      if (!tab) {
-        return res.status(404).json({
-          message: "Tab not found in spreadsheet",
-          code: "SHEET_TAB_NOT_FOUND",
-        });
-      }
-
-      try {
-        await appendTabRow(connection.sheetId, tab.title, cells);
-      } catch (error) {
-        console.error(error);
-        return res.status(502).json({
-          message: "Error writing to Google Sheets",
-          code: "SHEET_APPEND_FAILED",
-        });
-      }
-
-      try {
-        const updated = await db.transaction(async (tx) => {
-          const [row] = await tx
-            .update(sheet)
-            .set({
-              values: sql`coalesce(${sheet.values}, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-                'n',
-                (
-                  select coalesce(max((entry->>'n')::int), 0) + 1
-                  from jsonb_array_elements(coalesce(${sheet.values}, '[]'::jsonb)) as entry
-                ),
-                'cells',
-                ${JSON.stringify(cells)}::jsonb
-              ))`,
-              rowCount: sql`${sheet.rowCount} + 1`,
-            })
-            .where(
-              and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
-            )
-            .returning({
-              n: sql<number>`(${sheet.values}->-1->>'n')::int`,
-            });
-
-          if (!row) return null;
-
-          await tx.insert(history).values({
-            organizationId,
-            userId: user.id,
-            sheetId: connection.id,
-            eventType: "agregado",
-            actorName: user.name,
-            actorEmail: user.email,
-            rowNumber: row.n,
-            newValue: cells.filter(Boolean).join(" · "),
-            source: "relay",
-            action: `Agregó una fila a la pestaña "${tab.title}"`,
-            rawPayload: { cells },
-          });
-
-          return row;
-        });
-
-        if (!updated) {
-          return res.status(404).json({
-            message: "Sheet connection not found",
-            code: "SHEET_NOT_FOUND",
-          });
-        }
-
-        return res.status(201).json({
-          message: "Row added",
-          data: { n: updated.n, cells },
-        });
-      } catch (error) {
-        console.error(error);
-        return res.status(500).json({
-          message:
-            "Row was written to Google Sheets but could not be saved locally",
-          code: "SHEET_APPEND_SAVE_FAILED",
-        });
-      }
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({
-        message: "Error adding the row",
-        code: "SHEET_APPEND_FAILED",
-      });
-    }
-  },
-);
 
 routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
   const result = ImportSheetBody.safeParse(req.body);

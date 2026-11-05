@@ -3,6 +3,18 @@
 
 export type Action = "added" | "edited" | "deleted" | "imported" | "connected";
 
+// shortcut: Mexico City is UTC-6 year-round; use AT TIME ZONE if other zones arrive
+export function mxDayRange(now = new Date()) {
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const start = new Date(`${ymd}T00:00:00-06:00`);
+  return { start, end: new Date(start.getTime() + 86_400_000) };
+}
+
 const ACTION: Record<string, Action> = {
   agregado: "added",
   editado: "edited",

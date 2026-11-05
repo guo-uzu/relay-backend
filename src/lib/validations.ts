@@ -32,13 +32,6 @@ export const SheetRowsBody = z.object({
   size: z.number().int().positive().default(20),
 });
 
-export const AppendRowBody = z.object({
-  cells: z.union([
-    z.array(z.string()),
-    z.record(z.string(), z.string()),
-  ]),
-});
-
 export const WebhookEventSchema = z.object({
   // deterministic id from the source; retries reuse it and the DB ignores the duplicate
   externalId: z.string().min(1),
