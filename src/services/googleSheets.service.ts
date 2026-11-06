@@ -12,6 +12,20 @@ export async function getTabs(spreadsheetId: string) {
   }));
 }
 
+export async function appendTabRow(
+  spreadsheetId: string,
+  tabTitle: string,
+  cells: string[],
+) {
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `'${tabTitle.replaceAll("'", "''")}'`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [cells] },
+  });
+}
+
 // shortcut: one request for the whole tab, fine below ~10k rows; read in row ranges if Google's ~2MB response guidance is hit
 export async function getTabRows(spreadsheetId: string, tabTitle: string) {
   const { data } = await sheets.spreadsheets.values.get({
