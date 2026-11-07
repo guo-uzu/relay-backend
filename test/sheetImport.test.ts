@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parseSheetRows, SheetImportError } from "../src/lib/sheetImport.ts";
 
 describe("parseSheetRows", () => {
-  it("pads short rows, nulls blanks and skips blank rows", () => {
+  it("keeps sheet row numbers and raw cells, skipping blank rows", () => {
     const { headers, values } = parseSheetRows([
       ["_id", "name", "email"],
       ["a", "Ana", ""],
@@ -11,8 +11,8 @@ describe("parseSheetRows", () => {
     ]);
     expect(headers).toEqual(["_id", "name", "email"]);
     expect(values).toEqual([
-      ["a", "Ana", null],
-      ["b", null, null],
+      { n: 1, cells: ["a", "Ana", ""] },
+      { n: 3, cells: ["b"] },
     ]);
   });
 

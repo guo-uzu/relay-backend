@@ -88,6 +88,7 @@ CREATE TABLE "sheet" (
 	"sheet_id" text NOT NULL,
 	"user_id" text NOT NULL,
 	"name" text NOT NULL,
+	"row_count" integer DEFAULT 0 NOT NULL,
 	"google_tab_id" integer,
 	"headers" text[],
 	"values" jsonb,
@@ -104,6 +105,8 @@ CREATE INDEX "member_userId_idx" ON "member" ("user_id");--> statement-breakpoin
 CREATE UNIQUE INDEX "organization_slug_uidx" ON "organization" ("slug");--> statement-breakpoint
 CREATE INDEX "session_userId_idx" ON "session" ("user_id");--> statement-breakpoint
 CREATE INDEX "verification_identifier_idx" ON "verification" ("identifier");--> statement-breakpoint
+CREATE INDEX "organization_sheet_name_idx" ON "sheet" ("organization_id","sheet_id",lower("name"));--> statement-breakpoint
+CREATE INDEX "values_idx" ON "sheet" USING gin ("values");--> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "invitation" ADD CONSTRAINT "invitation_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "invitation" ADD CONSTRAINT "invitation_inviter_id_user_id_fkey" FOREIGN KEY ("inviter_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint

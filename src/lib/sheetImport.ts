@@ -2,6 +2,8 @@ export class SheetImportError extends Error {}
 
 const ID_HEADER = "_id";
 
+export type SheetRow = { n: number; cells: string[] };
+
 export function parseSheetRows(rows: string[][]) {
   const headers = rows[0];
   if (!headers?.length) throw new SheetImportError("Worksheet has no headers");
@@ -12,22 +14,22 @@ export function parseSheetRows(rows: string[][]) {
   }
 
   const seen = new Set<string>();
-  const values: (string | null)[][] = [];
+  const values: SheetRow[] = [];
 
   rows.slice(1).forEach((row, i) => {
     if (row.every((cell) => cell === "")) return;
 
-    const sheetRow = i + 2;
+    const n = i + 1;
     if (row.slice(headers.length).some((cell) => cell !== "")) {
-      throw new SheetImportError(`Row ${sheetRow} has data beyond the headers`);
+      throw new SheetImportError(`Row ${n} has data beyond the headers`);
     }
 
     const id = row[idIndex];
-    if (!id) throw new SheetImportError(`Row ${sheetRow} has an empty ${ID_HEADER}`);
-    if (seen.has(id)) throw new SheetImportError(`Row ${sheetRow} repeats ${ID_HEADER} "${id}"`);
+    if (!id) throw new SheetImportError(`Row ${n} has an empty ${ID_HEADER}`);
+    if (seen.has(id)) throw new SheetImportError(`Row ${n} repeats ${ID_HEADER} "${id}"`);
     seen.add(id);
 
-    values.push(headers.map((_, j) => (row[j] ? row[j] : null)));
+    values.push({ n, cells: row });
   });
 
   return { headers, values };
