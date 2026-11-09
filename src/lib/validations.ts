@@ -60,5 +60,34 @@ export const WebhookPayload = z.object({
   tabId: z.number().int(),
   event: WebhookEventSchema,
 });
+
+// Batch payload sent by the Apps Script change detector: one request per
+// detection run, with every row added / modified / deleted since the last snapshot.
+export const SheetChange = z.object({
+  type: z.enum(["added", "modified", "deleted"]),
+  // stable row id from the script-managed "_id" column
+  id: z.string().min(1),
+  // null for deleted rows (they no longer have a position in the sheet)
+  row: z.number().int().positive().nullable(),
+  data: z.record(z.string(), z.string()),
+  // only for "modified": { header: { from, to } }
+  changed: z.record(z.string(), z.object({
+    from: z.string().nullable(),
+    to: z.string().nullable(),
+  })).optional(),
+});
+
 export type SheetChange = z.infer<typeof SheetChange>;
+
+export const SheetChangesPayload = z.object({
+  spreadsheetId: z.string().min(1),
+  tabId: z.number().int(),
+  meta: z.object({
+    at: z.iso.datetime({ offset: true }),
+    user: z.string(),
+    trigger: z.string(),
+  }),
+  changes: z.array(SheetChange).min(1).max(500),
+});
+
 export type SheetChangesPayload = z.infer<typeof SheetChangesPayload>;
