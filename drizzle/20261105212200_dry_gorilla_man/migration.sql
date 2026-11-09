@@ -1,2 +1,0 @@
-ALTER TABLE "history" ALTER COLUMN "occurred_at" SET DATA TYPE timestamp with time zone USING "occurred_at"::timestamp with time zone;--> statement-breakpoint
-ALTER TABLE "sheet" ALTER COLUMN "imported_at" SET DATA TYPE timestamp with time zone USING "imported_at"::timestamp with time zone;

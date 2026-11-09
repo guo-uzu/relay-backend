@@ -9,9 +9,11 @@ import { requireAuth } from "./middlewares/auth.session.ts";
 import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger.ts";
 import cookieParser from "cookie-parser";
+import PathToSwaggerUI from "swagger-ui-dist"
 
 const app: Express = express();
 
+app.use(express.static(PathToSwaggerUI.absolutePath()))
 app.use(pinoHttp({ logger }));
 app.use(cors({
   origin: "http://localhost:5173",
@@ -19,6 +21,7 @@ app.use(cors({
   credentials: true,
 }))
 // auth
+
 app.all("/api/v1/auth/{*any}", toNodeHandler(auth));
 
 // parsers

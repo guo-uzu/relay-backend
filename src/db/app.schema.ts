@@ -11,6 +11,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+export type HeaderConfig = { name: string; optional: boolean };
+
 export const sheet = pgTable("sheet", {
   id: text("id")
     .primaryKey()
@@ -26,7 +28,7 @@ export const sheet = pgTable("sheet", {
   rowCount: integer("row_count").notNull().default(0),
   // nullable: rows registered before the import feature have no tab id
   googleTabId: integer("google_tab_id"),
-  headers: text("headers").array(),
+  headers: jsonb("headers").$type<HeaderConfig[]>(),
   // shortcut: whole snapshot in one jsonb ({ n: sheet row number, cells: raw API row }), every import rewrites it; split into a sheet_row table when per-row edits, search or paging are needed
   values: jsonb("values").$type<{ n: number; cells: string[] }[]>(),
   importedAt: timestamp("imported_at", { withTimezone: true }),

@@ -1,5 +1,5 @@
 import express, { type Router, type Request, type Response } from "express";
-import { ImportSheetBody, SetSheetId, AppendRowBody, SheetRowsBody, TestSheetId } from "../lib/validations.ts";
+import { ImportSheetBody, SetSheetId, AppendRowBody, SheetRowsBody, TestSheetId, HeaderConfigBody } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
@@ -192,6 +192,7 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
     }
 
     const headers = connection.headers ?? [];
+    const names = headers.map((h) => h.name);
     const cellValue = (index: number) =>
       sql`coalesce(elem->'cells' ->> ${index}::int, '')`;
 
@@ -207,7 +208,7 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
       );
 
     const filterConditions = result.data.filters.flatMap((filter): SQL[] => {
-      const index = headers.indexOf(filter.column);
+      const index = names.indexOf(filter.column);
       if (index === -1) return [];
       if (filter.op !== "isEmpty" && !filter.value.trim()) return [];
 
@@ -266,7 +267,7 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
       : sql`true`;
 
     const sortIndex = result.data.sort
-      ? headers.indexOf(result.data.sort)
+      ? names.indexOf(result.data.sort)
       : -1;
     const sortKey =
       sortIndex < 0
@@ -323,6 +324,106 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
     return res.status(500).json({
       message: "Error fetching sheet rows",
       code: "SHEET_ROWS_FETCH_FAILED",
+    });
+  }
+});
+
+routerSheets.patch("/:id/sheets/:sheetId/headers", async (req: Request, res: Response) => {
+  const result = HeaderConfigBody.safeParse(req.body);
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Invalid request body",
+      code: "SHEET_HEADERS_INVALID_REQUEST",
+    });
+  }
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+  }
+
+  try {
+    const [connection] = await db
+      .select({ headers: sheet.headers })
+      .from(sheet)
+      .where(
+        and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
+      )
+      .limit(1);
+
+    if (!connection) {
+      return res.status(404).json({
+        message: "Sheet connection not found",
+        code: "SHEET_NOT_FOUND",
+      });
+    }
+
+    const headers = connection.headers ?? [];
+    const index = headers.findIndex((h) => h.name === result.data.name);
+    if (index === -1) {
+      return res.status(400).json({
+        message: "Header not found in sheet",
+        code: "SHEET_HEADER_NOT_FOUND",
+      });
+    }
+    if (headers[index]!.optional === result.data.optional) {
+      return res.status(200).json({ message: "No changes" });
+    }
+
+    // single UPDATE with jsonb_set: no read-modify-write of the whole array
+    await db
+      .update(sheet)
+      .set({
+        headers: sql`jsonb_set(${sheet.headers}, ${`{${index},optional}`}::text[], ${JSON.stringify(result.data.optional)}::jsonb)`,
+      })
+      .where(
+        and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
+      );
+
+    return res.status(200).json({ message: "Header updated" });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error updating header",
+      code: "SHEET_HEADERS_UPDATE_FAILED",
+    });
+  }
+});
+
+routerSheets.get("/:id/sheets/:sheetId/headers", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrg(organizationId, user.id))) {
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+  }
+
+  try {
+    console.log(sheetId)
+    console.log(organizationId)
+    const [connection] = await db
+      .select({ headers: sheet.headers })
+      .from(sheet)
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)))
+      .limit(1);
+
+    if (!connection) {
+      return res.status(404).json({
+        message: "Sheet connection not found",
+        code: "SHEET_NOT_FOUND",
+      });
+    }
+
+    return res.status(200).json(connection.headers ?? []);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error fetching headers",
+      code: "SHEET_HEADERS_FETCH_FAILED",
     });
   }
 });
@@ -512,6 +613,7 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
         id: sheet.id,
         sheetId: sheet.sheetId,
         googleTabId: sheet.googleTabId,
+        headers: sheet.headers,
       })
       .from(sheet)
       .where(
@@ -547,9 +649,11 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
       });
     }
 
-    const { headers, values } = parseSheetRows(
+    const { headers: names, values } = parseSheetRows(
       await getTabRows(connection.sheetId, tab.title),
     );
+    const previous = new Map(connection.headers?.map((h) => [h.name, h.optional]));
+    const headers = names.map((name) => ({ name, optional: previous.get(name) ?? true }));
 
     // one UPDATE is atomic: any earlier failure leaves the previous snapshot untouched
     const importedAt = new Date();
