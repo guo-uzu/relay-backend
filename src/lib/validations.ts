@@ -60,3 +60,5 @@ export const WebhookPayload = z.object({
   tabId: z.number().int(),
   event: WebhookEventSchema,
 });
+export type SheetChange = z.infer<typeof SheetChange>;
+export type SheetChangesPayload = z.infer<typeof SheetChangesPayload>;
