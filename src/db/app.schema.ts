@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export type HeaderConfig = { name: string; optional: boolean };
+export type HeaderConfig = { name: string; obligatory: boolean };
 
 export const sheet = pgTable("sheet", {
   id: text("id")

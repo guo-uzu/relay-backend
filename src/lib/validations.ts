@@ -34,8 +34,10 @@ export const SheetRowsBody = z.object({
 
 export const HeaderConfigBody = z.object({
   name: z.string().min(1),
-  optional: z.boolean(),
+  obligatory: z.boolean(),
 });
+
+export const HeaderConfigsBody = z.array(HeaderConfigBody);
 
 export const AppendRowBody = z.object({
   cells: z.union([

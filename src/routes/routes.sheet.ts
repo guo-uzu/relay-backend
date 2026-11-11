@@ -1,5 +1,5 @@
 import express, { type Router, type Request, type Response } from "express";
-import { ImportSheetBody, SetSheetId, AppendRowBody, SheetRowsBody, TestSheetId, HeaderConfigBody } from "../lib/validations.ts";
+import { ImportSheetBody, SetSheetId, AppendRowBody, SheetRowsBody, TestSheetId, HeaderConfigBody, HeaderConfigsBody } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
@@ -369,7 +369,7 @@ routerSheets.patch("/:id/sheets/:sheetId/headers", async (req: Request, res: Res
         code: "SHEET_HEADER_NOT_FOUND",
       });
     }
-    if (headers[index]!.optional === result.data.optional) {
+    if (headers[index]!.obligatory === result.data.obligatory) {
       return res.status(200).json({ message: "No changes" });
     }
 
@@ -377,7 +377,7 @@ routerSheets.patch("/:id/sheets/:sheetId/headers", async (req: Request, res: Res
     await db
       .update(sheet)
       .set({
-        headers: sql`jsonb_set(${sheet.headers}, ${`{${index},optional}`}::text[], ${JSON.stringify(result.data.optional)}::jsonb)`,
+        headers: sql`jsonb_set(${sheet.headers}, ${`{${index},obligatory}`}::text[], ${JSON.stringify(result.data.obligatory)}::jsonb)`,
       })
       .where(
         and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
@@ -424,6 +424,66 @@ routerSheets.get("/:id/sheets/:sheetId/headers", async (req: Request, res: Respo
     return res.status(500).json({
       message: "Error fetching headers",
       code: "SHEET_HEADERS_FETCH_FAILED",
+    });
+  }
+});
+
+routerSheets.post("/:id/sheets/:sheetId/headers", async (req: Request, res: Response) => {
+  const result = HeaderConfigsBody.safeParse(req.body.headers);
+  console.log(req.body.headers)
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Invalid request body",
+      code: "SHEET_HEADERS_INVALID_REQUEST",
+    });
+  }
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+  }
+
+  try {
+    const [connection] = await db
+      .select({ headers: sheet.headers })
+      .from(sheet)
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)))
+      .limit(1);
+
+    if (!connection) {
+      return res.status(404).json({
+        message: "Sheet connection not found",
+        code: "SHEET_NOT_FOUND",
+      });
+    }
+
+    // headers map by position to the cells of each row: names and order must stay the sheet's columns
+    const current = connection.headers ?? [];
+    const sameColumns =
+      result.data.length === current.length &&
+      result.data.every((h, i) => h.name === current[i]!.name);
+    if (!sameColumns) {
+      return res.status(400).json({
+        message: "Headers do not match the sheet columns",
+        code: "SHEET_HEADERS_MISMATCH",
+      });
+    }
+
+    // ponytail: read-then-write, so an import running between the check and this update can leave stale names. Guard with a conditional UPDATE if imports run concurrently.
+    await db
+      .update(sheet)
+      .set({ headers: result.data })
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)));
+
+    return res.status(200).json({ message: "Headers updated" });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error updating headers",
+      code: "SHEET_HEADERS_UPDATE_FAILED",
     });
   }
 });
@@ -652,8 +712,8 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
     const { headers: names, values } = parseSheetRows(
       await getTabRows(connection.sheetId, tab.title),
     );
-    const previous = new Map(connection.headers?.map((h) => [h.name, h.optional]));
-    const headers = names.map((name) => ({ name, optional: previous.get(name) ?? true }));
+    const previous = new Map(connection.headers?.map((h) => [h.name, h.obligatory]));
+    const headers = names.map((name) => ({ name, obligatory: previous.get(name) ?? true }));
 
     // one UPDATE is atomic: any earlier failure leaves the previous snapshot untouched
     const importedAt = new Date();
