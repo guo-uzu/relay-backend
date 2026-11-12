@@ -1,0 +1,137 @@
+CREATE TABLE "account" (
+	"id" text PRIMARY KEY,
+	"account_id" text NOT NULL,
+	"provider_id" text NOT NULL,
+	"user_id" text NOT NULL,
+	"access_token" text,
+	"refresh_token" text,
+	"id_token" text,
+	"access_token_expires_at" timestamp,
+	"refresh_token_expires_at" timestamp,
+	"scope" text,
+	"password" text,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "invitation" (
+	"id" text PRIMARY KEY,
+	"organization_id" text NOT NULL,
+	"email" text NOT NULL,
+	"role" text,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"expires_at" timestamp NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"inviter_id" text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "member" (
+	"id" text PRIMARY KEY,
+	"organization_id" text NOT NULL,
+	"user_id" text NOT NULL,
+	"role" text DEFAULT 'member' NOT NULL,
+	"created_at" timestamp NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "organization" (
+	"id" text PRIMARY KEY,
+	"name" text NOT NULL,
+	"slug" text NOT NULL UNIQUE,
+	"logo" text,
+	"created_at" timestamp NOT NULL,
+	"metadata" text
+);
+--> statement-breakpoint
+CREATE TABLE "session" (
+	"id" text PRIMARY KEY,
+	"expires_at" timestamp NOT NULL,
+	"token" text NOT NULL UNIQUE,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp NOT NULL,
+	"ip_address" text,
+	"user_agent" text,
+	"user_id" text NOT NULL,
+	"active_organization_id" text
+);
+--> statement-breakpoint
+CREATE TABLE "user" (
+	"id" text PRIMARY KEY,
+	"name" text NOT NULL,
+	"email" text NOT NULL UNIQUE,
+	"email_verified" boolean DEFAULT false NOT NULL,
+	"image" text,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"plan" text DEFAULT 'free'
+);
+--> statement-breakpoint
+CREATE TABLE "verification" (
+	"id" text PRIMARY KEY,
+	"identifier" text NOT NULL,
+	"value" text NOT NULL,
+	"expires_at" timestamp NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "history" (
+	"id" text PRIMARY KEY,
+	"organization_id" text NOT NULL,
+	"user_id" text,
+	"sheet_id" text,
+	"event_type" text NOT NULL,
+	"actor_name" text,
+	"actor_email" text,
+	"action" text,
+	"row_number" integer,
+	"column_index" integer,
+	"column_name" text,
+	"old_value" text,
+	"new_value" text,
+	"source" text DEFAULT 'google_sheets' NOT NULL,
+	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"external_id" text,
+	"raw_payload" jsonb,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "sheet" (
+	"id" text PRIMARY KEY,
+	"organization_id" text NOT NULL,
+	"sheet_id" text NOT NULL,
+	"user_id" text NOT NULL,
+	"name" text NOT NULL,
+	"row_count" integer DEFAULT 0 NOT NULL,
+	"google_tab_id" integer,
+	"headers" jsonb,
+	"values" jsonb,
+	"imported_at" timestamp with time zone,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX "account_userId_idx" ON "account" ("user_id");--> statement-breakpoint
+CREATE INDEX "invitation_organizationId_idx" ON "invitation" ("organization_id");--> statement-breakpoint
+CREATE INDEX "invitation_email_idx" ON "invitation" ("email");--> statement-breakpoint
+CREATE INDEX "member_organizationId_idx" ON "member" ("organization_id");--> statement-breakpoint
+CREATE INDEX "member_userId_idx" ON "member" ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "organization_slug_uidx" ON "organization" ("slug");--> statement-breakpoint
+CREATE INDEX "session_userId_idx" ON "session" ("user_id");--> statement-breakpoint
+CREATE INDEX "verification_identifier_idx" ON "verification" ("identifier");--> statement-breakpoint
+CREATE INDEX "history_org_occurred_idx" ON "history" ("organization_id","occurred_at");--> statement-breakpoint
+CREATE INDEX "history_org_type_occurred_idx" ON "history" ("organization_id","event_type","occurred_at");--> statement-breakpoint
+CREATE INDEX "history_sheet_occurred_idx" ON "history" ("sheet_id","occurred_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "history_sheet_external_uidx" ON "history" ("sheet_id","external_id") WHERE "external_id" is not null;--> statement-breakpoint
+CREATE INDEX "organization_sheet_name_idx" ON "sheet" ("organization_id","sheet_id",lower("name"));--> statement-breakpoint
+CREATE INDEX "values_idx" ON "sheet" USING gin ("values");--> statement-breakpoint
+ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "invitation" ADD CONSTRAINT "invitation_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "invitation" ADD CONSTRAINT "invitation_inviter_id_user_id_fkey" FOREIGN KEY ("inviter_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "member" ADD CONSTRAINT "member_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "member" ADD CONSTRAINT "member_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "history" ADD CONSTRAINT "history_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id");--> statement-breakpoint
+ALTER TABLE "history" ADD CONSTRAINT "history_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id");--> statement-breakpoint
+ALTER TABLE "history" ADD CONSTRAINT "history_sheet_id_sheet_id_fkey" FOREIGN KEY ("sheet_id") REFERENCES "sheet"("id");--> statement-breakpoint
+ALTER TABLE "sheet" ADD CONSTRAINT "sheet_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id");--> statement-breakpoint
+ALTER TABLE "sheet" ADD CONSTRAINT "sheet_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id");

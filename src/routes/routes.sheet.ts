@@ -535,7 +535,8 @@ routerSheets.post(
       }
 
       const headers = connection.headers ?? [];
-      if (!headers.length) {
+      const idIndex = headers.findIndex((h) => h.name === "_id");
+      if (idIndex === -1) {
         return res.status(409).json({
           message: "Import the sheet before adding rows",
           code: "SHEET_NOT_IMPORTED",
@@ -554,6 +555,8 @@ routerSheets.post(
           code: "SHEET_ROW_EMPTY",
         });
       }
+      // after the empty check so the uuid alone never makes a row non-empty; overwrites any client-sent _id
+      cells[idIndex] = crypto.randomUUID();
 
       const tab = (await getTabs(connection.sheetId)).find(
         (t) => t.id === connection.googleTabId,
