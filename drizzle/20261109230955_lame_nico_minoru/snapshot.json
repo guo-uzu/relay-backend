@@ -1,9 +1,9 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "f39207e1-e236-435a-98f3-e551a9386b49",
+  "id": "1f32e716-0262-47c4-913b-cd9e118e6ed6",
   "prevIds": [
-    "d00cee06-29a9-448a-a327-92e9251e42b6"
+    "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
@@ -958,7 +958,7 @@
       "table": "history"
     },
     {
-      "type": "timestamp",
+      "type": "timestamp with time zone",
       "typeSchema": null,
       "notNull": true,
       "dimensions": 0,
@@ -1101,10 +1101,10 @@
       "table": "sheet"
     },
     {
-      "type": "text",
+      "type": "jsonb",
       "typeSchema": null,
       "notNull": false,
-      "dimensions": 1,
+      "dimensions": 0,
       "default": null,
       "generated": null,
       "identity": null,
@@ -1127,7 +1127,7 @@
       "table": "sheet"
     },
     {
-      "type": "timestamp",
+      "type": "timestamp with time zone",
       "typeSchema": null,
       "notNull": false,
       "dimensions": 0,

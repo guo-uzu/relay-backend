@@ -1,9 +1,9 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "d00cee06-29a9-448a-a327-92e9251e42b6",
+  "id": "01adab86-63d1-4f1b-9f15-ac4cee63eafd",
   "prevIds": [
-    "68052c36-cce6-4fc5-a621-7ce8977616b1"
+    "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
@@ -958,7 +958,7 @@
       "table": "history"
     },
     {
-      "type": "timestamp",
+      "type": "timestamp with time zone",
       "typeSchema": null,
       "notNull": true,
       "dimensions": 0,
@@ -966,6 +966,19 @@
       "generated": null,
       "identity": null,
       "name": "occurred_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "history"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "external_id",
       "entityType": "columns",
       "schema": "public",
       "table": "history"
@@ -1088,10 +1101,10 @@
       "table": "sheet"
     },
     {
-      "type": "text",
+      "type": "jsonb",
       "typeSchema": null,
       "notNull": false,
-      "dimensions": 1,
+      "dimensions": 0,
       "default": null,
       "generated": null,
       "identity": null,
@@ -1114,7 +1127,7 @@
       "table": "sheet"
     },
     {
-      "type": "timestamp",
+      "type": "timestamp with time zone",
       "typeSchema": null,
       "notNull": false,
       "dimensions": 0,
@@ -1407,6 +1420,34 @@
       "method": "btree",
       "concurrently": false,
       "name": "history_sheet_occurred_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "history"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "sheet_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "external_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"external_id\" is not null",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "history_sheet_external_uidx",
       "entityType": "indexes",
       "schema": "public",
       "table": "history"

@@ -1,5 +1,5 @@
 import express, { type Router, type Request, type Response } from "express";
-import { ImportSheetBody, SetSheetId, AppendRowBody, SheetRowsBody, TestSheetId } from "../lib/validations.ts";
+import { ImportSheetBody, SetSheetId, AppendRowBody, SheetRowsBody, TestSheetId, HeaderConfigBody, HeaderConfigsBody } from "../lib/validations.ts";
 import z from "zod";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
@@ -192,6 +192,7 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
     }
 
     const headers = connection.headers ?? [];
+    const names = headers.map((h) => h.name);
     const cellValue = (index: number) =>
       sql`coalesce(elem->'cells' ->> ${index}::int, '')`;
 
@@ -207,7 +208,7 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
       );
 
     const filterConditions = result.data.filters.flatMap((filter): SQL[] => {
-      const index = headers.indexOf(filter.column);
+      const index = names.indexOf(filter.column);
       if (index === -1) return [];
       if (filter.op !== "isEmpty" && !filter.value.trim()) return [];
 
@@ -266,7 +267,7 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
       : sql`true`;
 
     const sortIndex = result.data.sort
-      ? headers.indexOf(result.data.sort)
+      ? names.indexOf(result.data.sort)
       : -1;
     const sortKey =
       sortIndex < 0
@@ -327,6 +328,166 @@ routerSheets.post("/:id/sheets/:sheetId/rows", async (req: Request, res: Respons
   }
 });
 
+routerSheets.patch("/:id/sheets/:sheetId/headers", async (req: Request, res: Response) => {
+  const result = HeaderConfigBody.safeParse(req.body);
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Invalid request body",
+      code: "SHEET_HEADERS_INVALID_REQUEST",
+    });
+  }
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+  }
+
+  try {
+    const [connection] = await db
+      .select({ headers: sheet.headers })
+      .from(sheet)
+      .where(
+        and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
+      )
+      .limit(1);
+
+    if (!connection) {
+      return res.status(404).json({
+        message: "Sheet connection not found",
+        code: "SHEET_NOT_FOUND",
+      });
+    }
+
+    const headers = connection.headers ?? [];
+    const index = headers.findIndex((h) => h.name === result.data.name);
+    if (index === -1) {
+      return res.status(400).json({
+        message: "Header not found in sheet",
+        code: "SHEET_HEADER_NOT_FOUND",
+      });
+    }
+    if (headers[index]!.obligatory === result.data.obligatory) {
+      return res.status(200).json({ message: "No changes" });
+    }
+
+    // single UPDATE with jsonb_set: no read-modify-write of the whole array
+    await db
+      .update(sheet)
+      .set({
+        headers: sql`jsonb_set(${sheet.headers}, ${`{${index},obligatory}`}::text[], ${JSON.stringify(result.data.obligatory)}::jsonb)`,
+      })
+      .where(
+        and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)),
+      );
+
+    return res.status(200).json({ message: "Header updated" });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error updating header",
+      code: "SHEET_HEADERS_UPDATE_FAILED",
+    });
+  }
+});
+
+routerSheets.get("/:id/sheets/:sheetId/headers", async (req: Request, res: Response) => {
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!(await validateUserOrg(organizationId, user.id))) {
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+  }
+
+  try {
+    console.log(sheetId)
+    console.log(organizationId)
+    const [connection] = await db
+      .select({ headers: sheet.headers })
+      .from(sheet)
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)))
+      .limit(1);
+
+    if (!connection) {
+      return res.status(404).json({
+        message: "Sheet connection not found",
+        code: "SHEET_NOT_FOUND",
+      });
+    }
+
+    return res.status(200).json(connection.headers ?? []);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error fetching headers",
+      code: "SHEET_HEADERS_FETCH_FAILED",
+    });
+  }
+});
+
+routerSheets.post("/:id/sheets/:sheetId/headers", async (req: Request, res: Response) => {
+  const result = HeaderConfigsBody.safeParse(req.body.headers);
+  console.log(req.body.headers)
+  const organizationId = req.params.id as string;
+  const sheetId = req.params.sheetId as string;
+  const user = res.locals.user as User;
+
+  if (!result.success) {
+    return res.status(400).json({
+      message: "Invalid request body",
+      code: "SHEET_HEADERS_INVALID_REQUEST",
+    });
+  }
+
+  if (!(await validateUserOrgRole(organizationId, user.id, ORGANIZATION_ROLES))) {
+    return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
+  }
+
+  try {
+    const [connection] = await db
+      .select({ headers: sheet.headers })
+      .from(sheet)
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)))
+      .limit(1);
+
+    if (!connection) {
+      return res.status(404).json({
+        message: "Sheet connection not found",
+        code: "SHEET_NOT_FOUND",
+      });
+    }
+
+    // headers map by position to the cells of each row: names and order must stay the sheet's columns
+    const current = connection.headers ?? [];
+    const sameColumns =
+      result.data.length === current.length &&
+      result.data.every((h, i) => h.name === current[i]!.name);
+    if (!sameColumns) {
+      return res.status(400).json({
+        message: "Headers do not match the sheet columns",
+        code: "SHEET_HEADERS_MISMATCH",
+      });
+    }
+
+    // ponytail: read-then-write, so an import running between the check and this update can leave stale names. Guard with a conditional UPDATE if imports run concurrently.
+    await db
+      .update(sheet)
+      .set({ headers: result.data })
+      .where(and(eq(sheet.id, sheetId), eq(sheet.organizationId, organizationId)));
+
+    return res.status(200).json({ message: "Headers updated" });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error updating headers",
+      code: "SHEET_HEADERS_UPDATE_FAILED",
+    });
+  }
+});
+
 routerSheets.post(
   "/:id/sheets/:sheetId/rows/append",
   async (req: Request, res: Response) => {
@@ -374,7 +535,8 @@ routerSheets.post(
       }
 
       const headers = connection.headers ?? [];
-      if (!headers.length) {
+      const idIndex = headers.findIndex((h) => h.name === "_id");
+      if (idIndex === -1) {
         return res.status(409).json({
           message: "Import the sheet before adding rows",
           code: "SHEET_NOT_IMPORTED",
@@ -393,6 +555,8 @@ routerSheets.post(
           code: "SHEET_ROW_EMPTY",
         });
       }
+      // after the empty check so the uuid alone never makes a row non-empty; overwrites any client-sent _id
+      cells[idIndex] = crypto.randomUUID();
 
       const tab = (await getTabs(connection.sheetId)).find(
         (t) => t.id === connection.googleTabId,
@@ -512,6 +676,7 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
         id: sheet.id,
         sheetId: sheet.sheetId,
         googleTabId: sheet.googleTabId,
+        headers: sheet.headers,
       })
       .from(sheet)
       .where(
@@ -547,9 +712,11 @@ routerSheets.post("/:id/import-sheet", async (req: Request, res: Response) => {
       });
     }
 
-    const { headers, values } = parseSheetRows(
+    const { headers: names, values } = parseSheetRows(
       await getTabRows(connection.sheetId, tab.title),
     );
+    const previous = new Map(connection.headers?.map((h) => [h.name, h.obligatory]));
+    const headers = names.map((name) => ({ name, obligatory: previous.get(name) ?? true }));
 
     // one UPDATE is atomic: any earlier failure leaves the previous snapshot untouched
     const importedAt = new Date();

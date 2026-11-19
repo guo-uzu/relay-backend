@@ -76,9 +76,22 @@ CREATE TABLE "verification" (
 --> statement-breakpoint
 CREATE TABLE "history" (
 	"id" text PRIMARY KEY,
-	"user_id" text NOT NULL,
 	"organization_id" text NOT NULL,
-	"action" text NOT NULL,
+	"user_id" text,
+	"sheet_id" text,
+	"event_type" text NOT NULL,
+	"actor_name" text,
+	"actor_email" text,
+	"action" text,
+	"row_number" integer,
+	"column_index" integer,
+	"column_name" text,
+	"old_value" text,
+	"new_value" text,
+	"source" text DEFAULT 'google_sheets' NOT NULL,
+	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"external_id" text,
+	"raw_payload" jsonb,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -90,9 +103,9 @@ CREATE TABLE "sheet" (
 	"name" text NOT NULL,
 	"row_count" integer DEFAULT 0 NOT NULL,
 	"google_tab_id" integer,
-	"headers" text[],
+	"headers" jsonb,
 	"values" jsonb,
-	"imported_at" timestamp,
+	"imported_at" timestamp with time zone,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
@@ -105,6 +118,10 @@ CREATE INDEX "member_userId_idx" ON "member" ("user_id");--> statement-breakpoin
 CREATE UNIQUE INDEX "organization_slug_uidx" ON "organization" ("slug");--> statement-breakpoint
 CREATE INDEX "session_userId_idx" ON "session" ("user_id");--> statement-breakpoint
 CREATE INDEX "verification_identifier_idx" ON "verification" ("identifier");--> statement-breakpoint
+CREATE INDEX "history_org_occurred_idx" ON "history" ("organization_id","occurred_at");--> statement-breakpoint
+CREATE INDEX "history_org_type_occurred_idx" ON "history" ("organization_id","event_type","occurred_at");--> statement-breakpoint
+CREATE INDEX "history_sheet_occurred_idx" ON "history" ("sheet_id","occurred_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "history_sheet_external_uidx" ON "history" ("sheet_id","external_id") WHERE "external_id" is not null;--> statement-breakpoint
 CREATE INDEX "organization_sheet_name_idx" ON "sheet" ("organization_id","sheet_id",lower("name"));--> statement-breakpoint
 CREATE INDEX "values_idx" ON "sheet" USING gin ("values");--> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
@@ -113,7 +130,8 @@ ALTER TABLE "invitation" ADD CONSTRAINT "invitation_inviter_id_user_id_fkey" FOR
 ALTER TABLE "member" ADD CONSTRAINT "member_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "member" ADD CONSTRAINT "member_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;--> statement-breakpoint
-ALTER TABLE "history" ADD CONSTRAINT "history_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id");--> statement-breakpoint
 ALTER TABLE "history" ADD CONSTRAINT "history_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id");--> statement-breakpoint
+ALTER TABLE "history" ADD CONSTRAINT "history_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id");--> statement-breakpoint
+ALTER TABLE "history" ADD CONSTRAINT "history_sheet_id_sheet_id_fkey" FOREIGN KEY ("sheet_id") REFERENCES "sheet"("id");--> statement-breakpoint
 ALTER TABLE "sheet" ADD CONSTRAINT "sheet_organization_id_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organization"("id");--> statement-breakpoint
 ALTER TABLE "sheet" ADD CONSTRAINT "sheet_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id");
