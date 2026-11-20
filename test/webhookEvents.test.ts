@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toHistoryRows } from "../src/lib/webhookEvents.ts";
+import { toHistoryRows, toSheetOps } from "../src/lib/webhookEvents.ts";
 import { SheetChangesPayload } from "../src/lib/validations.ts";
 
 const connection = { id: "conn_1", organizationId: "org_1" };
@@ -92,6 +92,49 @@ describe("toHistoryRows", () => {
     );
 
     expect(rows).toEqual([]);
+  });
+});
+
+describe("toSheetOps", () => {
+  it("maps data rows to add, edit and delete ops", () => {
+    expect(toSheetOps(payload)).toEqual([
+      { kind: "add", id: "row-a", row: 15, data: added.data },
+      { kind: "edit", id: "row-b", data: modified.data },
+      { kind: "delete", id: "row-c" },
+    ]);
+  });
+
+  it("maps a header-row rename to a header op", () => {
+    const header = {
+      type: "modified" as const,
+      id: "row-h",
+      row: 1,
+      data: { Nombre: "Nombre", Observaciones: "" },
+      changed: { Notas: { from: "Notas", to: "Observaciones" } },
+    };
+
+    expect(toSheetOps({ ...payload, changes: [header] })).toEqual([
+      { kind: "header", from: "Notas", to: "Observaciones" },
+    ]);
+  });
+
+  it("ignores header-row changes that clear a header", () => {
+    const cleared = {
+      type: "modified" as const,
+      id: "row-h",
+      row: 1,
+      data: { Nombre: "Nombre", "": "" },
+      changed: { Notas: { from: "Notas", to: null } },
+    };
+
+    expect(toSheetOps({ ...payload, changes: [cleared] })).toEqual([]);
+  });
+
+  it("ignores added and deleted changes on the header row", () => {
+    const headerAdded = { ...added, row: 1 };
+    const headerDeleted = { ...deleted, row: 1 };
+
+    expect(toSheetOps({ ...payload, changes: [headerAdded, headerDeleted] })).toEqual([]);
   });
 });
 

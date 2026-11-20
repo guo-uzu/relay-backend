@@ -51,7 +51,7 @@ routerOrgs.get("/:id/dashboard", async (req: Request, res: Response) => {
         ),
       )
       .orderBy(desc(history.occurredAt))
-      .limit(15);
+      .limit(20);
 
     const today = await db
       .select({ eventType: history.eventType, count: count() })

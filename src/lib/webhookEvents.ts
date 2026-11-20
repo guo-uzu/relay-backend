@@ -69,3 +69,27 @@ export function toHistoryRows(
     }];
   });
 }
+
+// One operation to apply to the stored sheet state.
+export type SheetOp =
+  | { kind: "header"; from: string | null; to: string }
+  | { kind: "add"; id: string; row: number; data: Record<string, string> }
+  | { kind: "edit"; id: string; data: Record<string, string> }
+  | { kind: "delete"; id: string };
+
+// `id` is the row's `_id`, so callers can find the stored row via the jsonb index.
+export function toSheetOps(payload: SheetChangesPayload): SheetOp[] {
+  return payload.changes.flatMap<SheetOp>((change) => {
+    // row 1 is the header: only renames matter (clearing a header is ignored for now)
+    if (change.row === 1) {
+      if (change.type !== "modified") return [];
+      return Object.values(change.changed ?? {}).flatMap(({ from, to }) =>
+        to === null ? [] : [{ kind: "header" as const, from, to }],
+      );
+    }
+
+    if (change.type === "added") return [{ kind: "add", id: change.id, row: change.row!, data: change.data }];
+    if (change.type === "modified") return [{ kind: "edit", id: change.id, data: change.data }];
+    return [{ kind: "delete", id: change.id }];
+  });
+}

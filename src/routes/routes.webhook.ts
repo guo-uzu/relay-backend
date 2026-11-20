@@ -1,12 +1,15 @@
 import express, { type Request, type Response, type Router } from "express";
 import z from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
 import { SheetChangesPayload } from "../lib/validations.ts";
-import { toHistoryRows } from "../lib/webhookEvents.ts";
+import { toHistoryRows, toSheetOps } from "../lib/webhookEvents.ts";
 
 const routerWebhook: Router = express.Router();
+
+// jsonb containment value that matches the row whose cells hold this id (uses the GIN index)
+const idCell = (id: string) => JSON.stringify([{ cells: [id] }]);
 
 /*
   Called by the Google Apps Script installed in the spreadsheet.
@@ -41,20 +44,122 @@ routerWebhook.post("/updates", async (req: Request, res: Response) => {
   }
 
   const rows = toHistoryRows(payload, connection);
-  // a batch of only "modified" changes with an empty `changed` maps to no rows,
-  // and drizzle throws on .values([])
-  if (rows.length === 0) {
+  console.log(rows)
+  const ops = toSheetOps(payload);
+  // a modified change with an empty `changed` has no history rows but may still carry data
+  if (rows.length === 0 && ops.length === 0) {
     return res.status(200).json({ message: "Nothing to record", accepted: 0 });
   }
 
   try {
-    // one multi-row INSERT: the whole batch is stored or none of it, so the
-    // script's retry (it keeps its snapshot on error) never re-sends half a batch
-    const inserted = await db
-      .insert(history)
-      .values(rows)
-      .onConflictDoNothing()
-      .returning({ id: history.id });
+    // one transaction: the data and the history are stored together or not at all,
+    // so the script's retry (it keeps its snapshot on error) never re-sends half a batch
+    const inserted = await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ headers: sheet.headers })
+        .from(sheet)
+        .where(eq(sheet.id, connection.id))
+        .for("update");
+
+      // kept in JS so an "add" after a header op in the same batch sees the new column
+      let headers = current?.headers ?? [];
+      // cells are positional: they follow the current headers, and _id holds the row id
+      const cellsFor = (id: string, data: Record<string, string>) =>
+        headers.map((h) => (h.name === "_id" ? id : (data[h.name] ?? "")));
+
+      for (const op of ops) {
+        switch (op.kind) {
+          case "header": {
+            if (op.from === null) {
+              headers = [...headers, { name: op.to, obligatory: true }];
+              await tx
+                .update(sheet)
+                .set({
+                  headers: sql`coalesce(${sheet.headers}, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('name', ${op.to}::text, 'obligatory', true))`,
+                })
+                .where(eq(sheet.id, connection.id));
+            } else {
+              headers = headers.map((h) =>
+                h.name === op.from ? { ...h, name: op.to } : h,
+              );
+              await tx
+                .update(sheet)
+                .set({
+                  headers: sql`(select jsonb_agg(case when h->>'name' = ${op.from} then jsonb_set(h, '{name}', to_jsonb(${op.to}::text)) else h end order by ord) from jsonb_array_elements(coalesce(${sheet.headers}, '[]'::jsonb)) with ordinality as t(h, ord))`,
+                })
+                .where(eq(sheet.id, connection.id));
+            }
+            break;
+          }
+
+          case "add": {
+            const cells = cellsFor(op.id, op.data);
+            await tx
+              .update(sheet)
+              .set({
+                values: sql`coalesce(${sheet.values}, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+                  'n',
+                  (
+                    select coalesce(max((entry->>'n')::int), 0) + 1
+                    from jsonb_array_elements(coalesce(${sheet.values}, '[]'::jsonb)) as entry
+                  ),
+                  'cells',
+                  ${JSON.stringify(cells)}::jsonb
+                ))`,
+                rowCount: sql`${sheet.rowCount} + 1`,
+              })
+              // NOT ( ... ) with coalesce: a NULL values column would make the check NULL and skip the add
+              .where(
+                and(
+                  eq(sheet.id, connection.id),
+                  sql`not (coalesce(${sheet.values}, '[]'::jsonb) @> ${idCell(op.id)}::jsonb)`,
+                ),
+              );
+            break;
+          }
+
+          case "edit": {
+            const cells = cellsFor(op.id, op.data);
+            await tx
+              .update(sheet)
+              .set({
+                values: sql`(select jsonb_agg(case when e->'cells' ? ${op.id}::text then jsonb_set(e, '{cells}', ${JSON.stringify(cells)}::jsonb) else e end order by ord) from jsonb_array_elements(${sheet.values}) with ordinality as t(e, ord))`,
+              })
+              .where(
+                and(
+                  eq(sheet.id, connection.id),
+                  sql`${sheet.values} @> ${idCell(op.id)}::jsonb`,
+                ),
+              );
+            break;
+          }
+
+          case "delete": {
+            await tx
+              .update(sheet)
+              .set({
+                values: sql`(select coalesce(jsonb_agg(e order by ord), '[]'::jsonb) from jsonb_array_elements(${sheet.values}) with ordinality as t(e, ord) where not (e->'cells' ? ${op.id}::text))`,
+                rowCount: sql`greatest(${sheet.rowCount} - 1, 0)`,
+              })
+              .where(
+                and(
+                  eq(sheet.id, connection.id),
+                  sql`${sheet.values} @> ${idCell(op.id)}::jsonb`,
+                ),
+              );
+            break;
+          }
+        }
+      }
+
+      // drizzle throws on .values([]), and a header-only batch has no history rows
+      if (rows.length === 0) return [];
+      return tx
+        .insert(history)
+        .values(rows)
+        .onConflictDoNothing()
+        .returning({ id: history.id });
+    });
 
     return res.status(200).json({
       message: "Webhook processed successfully",
