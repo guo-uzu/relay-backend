@@ -21,8 +21,9 @@
   },
   "type": "module",
   "dependencies": {
-    "@better-auth/drizzle-adapter": "^1.7.6",
-    "better-auth": "^1.7.5",
+    "@better-auth/api-key": "^1.7.27",
+    "@better-auth/drizzle-adapter": "^1.7.27",
+    "better-auth": "^1.7.27",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "drizzle-orm": "1.0.0-rc.4",

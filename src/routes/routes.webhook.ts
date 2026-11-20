@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type Router } from "express";
 import z from "zod";
 import { and, eq, sql } from "drizzle-orm";
+import { auth } from "../lib/auth.ts";
 import { db } from "../db/index.ts";
 import { history, sheet } from "../db/app.schema.ts";
 import { SheetChangesPayload } from "../lib/validations.ts";
@@ -13,10 +14,26 @@ const idCell = (id: string) => JSON.stringify([{ cells: [id] }]);
 
 /*
   Called by the Google Apps Script installed in the spreadsheet.
-  shortcut: the endpoint is open for the MVP because the sheet is an internal
-  document; add a secret or a per-connection token before sharing it outside.
+  Authenticated with an organization API key sent in the `x-api-key` header.
+  The organization comes from the key (server-side), never from the request body.
 */
 routerWebhook.post("/updates", async (req: Request, res: Response) => {
+  const apiKey = req.get("x-api-key");
+  if (!apiKey) {
+    return res.status(401).json({ message: "Missing API key" });
+  }
+
+  // hashes the key, looks it up, and checks enabled / expiry
+  const verified = await auth.api.verifyApiKey({ body: { key: apiKey } });
+  if (!verified.valid || !verified.key) {
+    return res.status(401).json({ message: "Invalid API key" });
+  }
+  // references: "organization", so referenceId is the owning organization's id
+  const organizationId = verified.key.referenceId;
+  // optional scope: the key may be limited to a single sheet connection
+  const scopedSheetId =
+    typeof verified.key.metadata?.sheetId === "string" ? verified.key.metadata.sheetId : null;
+
   const result = SheetChangesPayload.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({
@@ -26,15 +43,17 @@ routerWebhook.post("/updates", async (req: Request, res: Response) => {
   }
 
   const payload = result.data;
-  // shortcut: first matching connection wins; disambiguate with a token if two
-  // organizations ever connect the same tab
+  // scoped to the key's organization: two orgs connecting the same tab can't collide, and a key
+  // can never reach another org's sheet. and() ignores the undefined when the key isn't scoped.
   const [connection] = await db
     .select({ id: sheet.id, organizationId: sheet.organizationId })
     .from(sheet)
     .where(
       and(
+        eq(sheet.organizationId, organizationId),
         eq(sheet.sheetId, payload.spreadsheetId),
         eq(sheet.googleTabId, payload.tabId),
+        scopedSheetId ? eq(sheet.id, scopedSheetId) : undefined,
       ),
     )
     .limit(1);

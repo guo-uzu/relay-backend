@@ -6,3 +6,13 @@ allowBuilds:
   msgpackr-extract: true
   tree-sitter: true
   tree-sitter-json: true
+minimumReleaseAgeExclude:
+  - '@better-auth/api-key@1.7.27'
+  - '@better-auth/core@1.7.27'
+  - '@better-auth/drizzle-adapter@1.7.27'
+  - '@better-auth/kysely-adapter@1.7.27'
+  - '@better-auth/memory-adapter@1.7.27'
+  - '@better-auth/mongo-adapter@1.7.27'
+  - '@better-auth/prisma-adapter@1.7.27'
+  - '@better-auth/telemetry@1.7.27'
+  - better-auth@1.7.27

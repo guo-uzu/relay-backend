@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { organization } from "better-auth/plugins";
+import { apiKey } from "@better-auth/api-key";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter/relations-v2";
 import { db } from "../db/index.ts";
-import { account, invitation, member, organization as organizationTable, session, user, verification } from "../db/schema.ts";
+import { account, apikey, invitation, member, organization as organizationTable, session, user, verification } from "../db/schema.ts";
 import { sendOrganizationInvitation } from "./email.ts";
 import { validateUserOrgRole } from "./validate.user.org.ts";
 
@@ -47,6 +48,7 @@ export const auth = betterAuth({
       organization: organizationTable,
       member,
       invitation,
+      apikey,
     },
   }),
   emailAndPassword: {
@@ -64,6 +66,16 @@ export const auth = betterAuth({
       async sendInvitationEmail(data) {
         await sendInvitation(data.email, data.organization.id, data.role, data.inviter.user.id, data.id);
       },
-    })
+    }),
+    // Keys for the Apps Script. They belong to an organization, so the webhook can
+    // derive the org from the key instead of trusting anything the script sends.
+    apiKey({
+      references: "organization",
+      defaultPrefix: "rly_",
+      // the client may attach { sheetId } to scope a key to one connection (re-checked in the webhook)
+      enableMetadata: true,
+      // the plugin default is 10 requests/day, which would reject a busy sheet
+      rateLimit: { enabled: false },
+    }),
   ]
 });

@@ -1,5 +1,5 @@
 import { defineRelationsPart } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
 					id: text('id').primaryKey(),
@@ -92,7 +92,40 @@ export const invitation = pgTable("invitation", {
 ]);
 
 
-export const authRelations = defineRelationsPart({ user, session, account, verification, organization, member, invitation }, (r) => ({
+// API keys for machine clients (the Apps Script). `referenceId` is the owning organization's id
+// (the plugin runs with references: "organization"), so it is polymorphic and has no FK.
+// `key` stores only the SHA-256 hash; the plain key is shown once at creation.
+export const apikey = pgTable("apikey", {
+					id: text('id').primaryKey(),
+					configId: text('config_id').default("default").notNull(),
+ name: text('name'),
+ start: text('start'),
+ referenceId: text('reference_id').notNull(),
+ prefix: text('prefix'),
+ key: text('key').notNull(),
+ refillInterval: integer('refill_interval'),
+ refillAmount: integer('refill_amount'),
+ lastRefillAt: timestamp('last_refill_at'),
+ enabled: boolean('enabled').default(true),
+ rateLimitEnabled: boolean('rate_limit_enabled').default(true),
+ rateLimitTimeWindow: integer('rate_limit_time_window'),
+ rateLimitMax: integer('rate_limit_max'),
+ requestCount: integer('request_count').default(0),
+ remaining: integer('remaining'),
+ lastRequest: timestamp('last_request'),
+ expiresAt: timestamp('expires_at'),
+ createdAt: timestamp('created_at').notNull(),
+ updatedAt: timestamp('updated_at').notNull(),
+ permissions: text('permissions'),
+ metadata: text('metadata')
+					}, (table) => [
+  index("apikey_configId_idx").on(table.configId),
+  index("apikey_referenceId_idx").on(table.referenceId),
+  index("apikey_key_idx").on(table.key),
+]);
+
+
+export const authRelations = defineRelationsPart({ user, session, account, verification, organization, member, invitation, apikey }, (r) => ({
   user: {
     sessions: r.many.session({
       from: r.user.id,
